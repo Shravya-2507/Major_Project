@@ -1,62 +1,76 @@
-// controllers/interviewController.js
 import pool from "../config/db.js";
-import { smithWaterman } from "../utils/smithWaterman.js";
+import { evaluateAnswer } from "../services/evaluationService.js";
 
-// Free AI simulation: generate questions
-export const generateQuestionsFree = async (req, res) => {
-  const { roleId, companyId, syllabusIds } = req.body;
-
+// Generate Questions (optional VTU syllabus)
+export const generateQuestions = async (req, res) => {
   try {
-    const query = `
-      SELECT * FROM questions
-      WHERE role_id = $1 AND company_id = $2
-      ${syllabusIds && syllabusIds.length > 0 ? "AND syllabus_id = ANY($3)" : ""}
-      LIMIT 5
-    `;
+    const { roleId, companyId, syllabusIds } = req.body;
 
-    const values = syllabusIds && syllabusIds.length > 0 ? [roleId, companyId, syllabusIds] : [roleId, companyId];
+    if (!roleId) return res.status(400).json({ error: "roleId required" });
+
+    let query = `SELECT * FROM questions WHERE role_id = $1`;
+    const values = [roleId];
+    let counter = 2;
+
+    if (companyId) {
+      query += ` AND company_id = $${counter++}`;
+      values.push(companyId);
+    }
+
+    if (syllabusIds?.length) {
+      query += ` AND syllabus_id = ANY($${counter++})`;
+      values.push(syllabusIds);
+    }
+
+    query += ` LIMIT 5`;
+
     const result = await pool.query(query, values);
-
     res.json(result.rows);
   } catch (err) {
-    console.error(err);
+    console.error("Error generating questions:", err);
     res.status(500).json({ error: "Failed to generate questions" });
   }
 };
 
-// Free AI simulation: evaluate answers
-export const evaluateAnswersFree = async (req, res) => {
-  const { interviewId, answers } = req.body; // [{ questionId, answerText }]
-
+// Evaluate Answers
+export const evaluateAnswers = async (req, res) => {
   try {
+    const { candidateId, answers } = req.body;
+
+    if (!candidateId || !answers?.length) {
+      return res.status(400).json({ error: "candidateId and answers required" });
+    }
+
     const results = [];
 
     for (const ans of answers) {
-      const dbQuestion = await pool.query(
-        "SELECT expected_answer FROM questions WHERE id = $1",
+      const dbRes = await pool.query(
+        "SELECT role_id, company_id, expected_answer FROM questions WHERE id = $1",
         [ans.questionId]
       );
-      const expected = dbQuestion.rows[0].expected_answer;
 
-      const score = smithWaterman(ans.answerText, expected); // similarity 0–1
-      const feedback =
-        score > 0.8
-          ? "Excellent"
-          : score > 0.5
-          ? "Good"
-          : "Needs improvement";
+      const question = dbRes.rows[0];
+      if (!question) continue;
+
+      const { score, feedback } = evaluateAnswer(ans.answerText, question.expected_answer || "");
 
       await pool.query(
-        "INSERT INTO answers (interview_id, question_id, answer_text, ai_score, ai_feedback) VALUES ($1,$2,$3,$4,$5)",
-        [interviewId, ans.questionId, ans.answerText, score * 10, feedback]
+        `INSERT INTO answers
+         (candidate_id, question_id, role_id, company_id, answer_text, ai_score, ai_feedback)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+        [candidateId, ans.questionId, question.role_id, question.company_id, ans.answerText, score, feedback]
       );
 
-      results.push({ questionId: ans.questionId, ai_score: score * 10, ai_feedback: feedback });
+      results.push({
+        questionId: ans.questionId,
+        ai_score: score,
+        ai_feedback: feedback
+      });
     }
 
     res.json(results);
   } catch (err) {
-    console.error(err);
+    console.error("Error evaluating answers:", err);
     res.status(500).json({ error: "Evaluation failed" });
   }
 };
