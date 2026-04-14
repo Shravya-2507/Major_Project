@@ -18,7 +18,6 @@ export const getQuestions = async (req, res) => {
   try {
     const { roleId, companyId, syllabusIds } = parseFilters(req);
 
-    // Update this check to match your requirements
     if (!roleId && (!syllabusIds || syllabusIds.length === 0)) {
       return res.status(400).json({ 
         error: "Search criteria missing", 

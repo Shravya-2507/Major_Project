@@ -1,76 +1,47 @@
 import pool from "../config/db.js";
 import { evaluateAnswer } from "../services/evaluationService.js";
+import axios from "axios";
 
-// Generate Questions (optional VTU syllabus)
+// 1. Generate Questions (Flexible for Job-Seekers and VTU Practice)
 export const generateQuestions = async (req, res) => {
-  try {
-    const { roleId, companyId, syllabusIds } = req.body;
+  try {
+    const { roleId, companyId, syllabusIds } = req.body;
 
-    if (!roleId) return res.status(400).json({ error: "roleId required" });
+    // Start with a base query that is always true
+    let query = `SELECT * FROM questions WHERE 1=1`;
+    const values = [];
+    let counter = 1;
 
-    let query = `SELECT * FROM questions WHERE role_id = $1`;
-    const values = [roleId];
-    let counter = 2;
+    // 1. Filter by Role if provided
+    if (roleId) {
+      query += ` AND role_id = $${counter++}`;
+      values.push(roleId);
+    }
 
-    if (companyId) {
-      query += ` AND company_id = $${counter++}`;
-      values.push(companyId);
-    }
+    // 2. Filter by Company if provided (OR generic questions for that role)
+    if (companyId) {
+      query += ` AND (company_id = $${counter++} OR company_id IS NULL)`;
+      values.push(companyId);
+    }
 
-    if (syllabusIds?.length) {
-      query += ` AND syllabus_id = ANY($${counter++})`;
-      values.push(syllabusIds);
-    }
+    // 3. Filter by Syllabus/Subject (Crucial for VTU Practice Mode)
+    if (syllabusIds && syllabusIds.length > 0) {
+      query += ` AND syllabus_id = ANY($${counter++})`;
+      values.push(syllabusIds);
+    }
 
-    query += ` LIMIT 5`;
+    // 4. Randomize and limit
+    query += ` ORDER BY RANDOM() LIMIT 5`;
 
-    const result = await pool.query(query, values);
-    res.json(result.rows);
-  } catch (err) {
-    console.error("Error generating questions:", err);
-    res.status(500).json({ error: "Failed to generate questions" });
-  }
-};
+    const result = await pool.query(query, values);
 
-// Evaluate Answers
-export const evaluateAnswers = async (req, res) => {
-  try {
-    const { candidateId, answers } = req.body;
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: "No questions found matching these criteria." });
+    }
 
-    if (!candidateId || !answers?.length) {
-      return res.status(400).json({ error: "candidateId and answers required" });
-    }
-
-    const results = [];
-
-    for (const ans of answers) {
-      const dbRes = await pool.query(
-        "SELECT role_id, company_id, expected_answer FROM questions WHERE id = $1",
-        [ans.questionId]
-      );
-
-      const question = dbRes.rows[0];
-      if (!question) continue;
-
-      const { score, feedback } = evaluateAnswer(ans.answerText, question.expected_answer || "");
-
-      await pool.query(
-        `INSERT INTO answers
-         (candidate_id, question_id, role_id, company_id, answer_text, ai_score, ai_feedback)
-         VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-        [candidateId, ans.questionId, question.role_id, question.company_id, ans.answerText, score, feedback]
-      );
-
-      results.push({
-        questionId: ans.questionId,
-        ai_score: score,
-        ai_feedback: feedback
-      });
-    }
-
-    res.json(results);
-  } catch (err) {
-    console.error("Error evaluating answers:", err);
-    res.status(500).json({ error: "Evaluation failed" });
-  }
+    res.json(result.rows);
+  } catch (err) {
+    console.error("Error generating questions:", err);
+    res.status(500).json({ error: "Failed to generate questions" });
+  }
 };
