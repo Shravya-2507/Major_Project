@@ -2,8 +2,12 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 from typing import List
 from fastapi.middleware.cors import CORSMiddleware
+import logging
+import traceback
 
-# Import your AI modules
+# =============================
+# AI MODULE IMPORTS
+# =============================
 from answer_evaluation import evaluate_answer
 from topic_analysis import (
     analyze_topics,
@@ -13,26 +17,32 @@ from topic_analysis import (
 )
 from pagerank import pagerank_topics
 
+# =============================
+# APP SETUP
+# =============================
 app = FastAPI()
 
-# -----------------------------
-# ✅ CORS (IMPORTANT for backend)
-# -----------------------------
+logging.basicConfig(level=logging.INFO)
+
+# =============================
+# CORS
+# =============================
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # allow all (for development)
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# -----------------------------
-# Request Models
-# -----------------------------
-
+# =============================
+# MODELS
+# =============================
 class AnswerRequest(BaseModel):
     student_answer: str
     correct_answer: str
+    role: str = "General"
+    company: str = "General"
 
 
 class Question(BaseModel):
@@ -46,52 +56,48 @@ class TopicAnalysisRequest(BaseModel):
     user_answers: List[str]
 
 
-# -----------------------------
-# Routes
-# -----------------------------
+class ResumeRequest(BaseModel):
+    text: str
+    role: str = "General"
 
+# =============================
+# ROOT
+# =============================
 @app.get("/")
 def home():
     return {"message": "AI Module API is running 🚀"}
 
-
-# ✅ 1. Evaluate Single Answer
+# =============================
+# EVALUATE ANSWER
+# =============================
 @app.post("/evaluate")
 def evaluate(req: AnswerRequest):
     try:
-        result = evaluate_answer(req.student_answer, req.correct_answer)
-        return result
-
+        return evaluate_answer(
+            req.student_answer,
+            req.correct_answer,
+            role=req.role,
+            company=req.company
+        )
     except Exception as e:
-        print("❌ AI ERROR:", str(e))
-        return {
-            "semantic_score": 0,
-            "smith_score": 0,
-            "final_score": 0,
-            "result": "Error"
-        }
+        logging.error(traceback.format_exc())
+        return {"error": "Evaluation failed"}
 
-
-# ✅ 2. Analyze Topics (Full Pipeline)
+# =============================
+# TOPIC ANALYSIS
+# =============================
 @app.post("/analyze-topics")
 def analyze(req: TopicAnalysisRequest):
     try:
-        questions = [q.dict() for q in req.questions]
-        user_answers = req.user_answers
+        if len(req.questions) != len(req.user_answers):
+            return {"error": "Mismatch in questions and answers"}
 
-        # Step 1: Topic Scores
-        topic_scores = analyze_topics(questions, user_answers)
+        questions = [q.model_dump() for q in req.questions]
 
-        # Step 2: Average Performance
+        topic_scores = analyze_topics(questions, req.user_answers)
         topic_avg = calculate_topic_performance(topic_scores)
-
-        # Step 3: Ranking
         ranked = rank_topics(topic_avg)
-
-        # Step 4: Classification
         classified = classify_topics(topic_avg)
-
-        # Step 5: PageRank Importance
         pagerank_scores = pagerank_topics(topic_avg)
 
         return {
@@ -103,7 +109,128 @@ def analyze(req: TopicAnalysisRequest):
         }
 
     except Exception as e:
-        print("❌ TOPIC ANALYSIS ERROR:", str(e))
+        logging.error(traceback.format_exc())
         return {
-            "error": "Topic analysis failed"
+            "error": str(e),
+            "message": "Topic analysis failed"
+        }
+
+# =============================
+# 🚀 RESUME ANALYSIS (STABLE + AI SAFE)
+# =============================
+@app.post("/analyze-resume")
+def analyze_resume(req: ResumeRequest):
+    try:
+        text = (req.text or "").lower().strip()
+        role = (req.role or "").lower()
+
+        if not text:
+            return {"score": 0, "feedback": ["Empty resume"]}
+
+        # ==============================
+        # ROLE SKILL MAP (STRICT AI RULES)
+        # ==============================
+        ROLE_REQUIREMENTS = {
+            "backend": {
+                "must_have": ["node", "express", "api", "database"],
+                "nice_to_have": ["jwt", "authentication", "rest", "mongodb", "sql"],
+                "soft_skills": ["problem solving", "communication"]
+            },
+
+            "data scientist": {
+                "must_have": ["python", "machine learning", "pandas", "numpy"],
+                "nice_to_have": ["statistics", "visualization", "data analysis"],
+                "soft_skills": ["problem solving", "analytical thinking"]
+            },
+
+            "software engineer": {
+                "must_have": ["data structures", "algorithms", "system design"],
+                "nice_to_have": ["api", "projects", "development"],
+                "soft_skills": ["problem solving", "coding"]
+            }
+        }
+
+        # detect role
+        role_key = "software engineer"
+        for r in ROLE_REQUIREMENTS:
+            if r in role:
+                role_key = r
+
+        rules = ROLE_REQUIREMENTS[role_key]
+
+        # ==============================
+        # START FROM 100 (REALISTIC SCORING)
+        # ==============================
+        score = 100
+        feedback = []
+
+        # ==============================
+        # MUST HAVE (HIGH PENALTY)
+        # ==============================
+        for skill in rules["must_have"]:
+            if skill not in text:
+                score -= 15
+                feedback.append(f"Missing core skill: {skill}")
+
+        # ==============================
+        # NICE TO HAVE (MEDIUM PENALTY)
+        # ==============================
+        for skill in rules["nice_to_have"]:
+            if skill not in text:
+                score -= 6
+                feedback.append(f"Add skill: {skill}")
+
+        # ==============================
+        # SOFT SKILLS (SMALL BONUS ONLY)
+        # ==============================
+        for skill in rules["soft_skills"]:
+            if skill in text:
+                score += 2
+
+        # ==============================
+        # PROJECT CHECK
+        # ==============================
+        if "project" not in text:
+            score -= 10
+            feedback.append("Add internship/projects experience")
+
+        # ==============================
+        # INTERNSHIP CHECK
+        # ==============================
+        if "intern" not in text:
+            score -= 12
+            feedback.append("Add internship experience")
+
+        # ==============================
+        # ACHIEVEMENT CHECK
+        # ==============================
+        if not any(w in text for w in ["built", "developed", "led", "optimized"]):
+            score -= 8
+            feedback.append("Add measurable achievements")
+
+        # ==============================
+        # POSITIVE SIGNALS (SMALL BOOST ONLY)
+        # ==============================
+        if any(w in text for w in ["built", "developed", "led"]):
+            score += 3
+
+        if any(char.isdigit() for char in text):
+            score += 3  # numbers = impact
+
+        # ==============================
+        # FINAL CLAMP (IMPORTANT)
+        # ==============================
+        score = max(0, min(100, score))
+
+        return {
+            "role_detected": role_key,
+            "score": round(score, 2),
+            "feedback": list(set(feedback))
+        }
+
+    except Exception as e:
+        return {
+            "score": 0,
+            "error": str(e),
+            "message": "Resume analysis failed"
         }

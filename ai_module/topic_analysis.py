@@ -36,15 +36,18 @@ def rank_topics(topic_avg):
     return sorted(topic_avg.items(), key=lambda x: x[1], reverse=True)
 
 
-# ✅ Step 4: Classify topics
+# ✅ Step 4: Classify topics (Updated for 100-point scale)
 def classify_topics(topic_avg):
     result = {}
 
     for topic, score in topic_avg.items():
-        if score > 0.75:
+        # Adjusting thresholds to match your 100-mark system
+        if score >= 75:
             result[topic] = "Strong"
-        elif score > 0.5:
+        elif score >= 60:
             result[topic] = "Moderate"
+        elif score >= 40:
+            result[topic] = "Average"
         else:
             result[topic] = "Needs Improvement"
 
