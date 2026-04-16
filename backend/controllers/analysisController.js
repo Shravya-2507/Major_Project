@@ -5,10 +5,14 @@ import axios from "axios";
 const AI_API = process.env.AI_API_URL || "http://localhost:8000";
 
 // ==============================
-// 1. Evaluate Answers (FINAL FIXED)
+// 1. Evaluate Answers (FINAL FIX)
 // ==============================
 export const evaluateAnswers = async (req, res) => {
+  const client = await pool.connect();
+
   try {
+    console.log("🚀 API HIT");
+
     const { candidateId, answers, roleId, companyId } = req.body;
 
     if (!candidateId || !answers?.length) {
@@ -17,24 +21,26 @@ export const evaluateAnswers = async (req, res) => {
       });
     }
 
-    // ✅ UNIQUE SESSION ID
-    const sessionId = `${candidateId}-${Date.now()}`;
+    // ✅ FIXED session id (no collision)
+    const sessionId = `${candidateId}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+
+    await client.query("BEGIN");
 
     let selectedRoleName = "Academic/VTU";
     let selectedCompanyName = "General Practice";
 
-    // ✅ Fetch role name
+    // Fetch role
     if (roleId) {
-      const roleRes = await pool.query(
+      const roleRes = await client.query(
         "SELECT role_name FROM roles WHERE id = $1",
         [roleId]
       );
       selectedRoleName = roleRes.rows[0]?.role_name || selectedRoleName;
     }
 
-    // ✅ Fetch company name
+    // Fetch company
     if (companyId) {
-      const compRes = await pool.query(
+      const compRes = await client.query(
         "SELECT company_name FROM companies WHERE id = $1",
         [companyId]
       );
@@ -42,10 +48,10 @@ export const evaluateAnswers = async (req, res) => {
         compRes.rows[0]?.company_name || selectedCompanyName;
     }
 
-    // ✅ Fetch all expected answers (OPTIMIZED)
+    // Fetch expected answers
     const questionIds = answers.map((a) => a.questionId);
 
-    const questionData = await pool.query(
+    const questionData = await client.query(
       `SELECT id, expected_answer FROM questions WHERE id = ANY($1)`,
       [questionIds]
     );
@@ -62,6 +68,8 @@ export const evaluateAnswers = async (req, res) => {
     // LOOP
     // ==============================
     for (const ans of answers) {
+      console.log("👉 Processing Question:", ans.questionId);
+
       const expected = questionMap[ans.questionId] || "";
 
       const aiData = await evaluateAnswer(
@@ -71,15 +79,19 @@ export const evaluateAnswers = async (req, res) => {
         selectedCompanyName
       );
 
-      // ✅ IMPORTANT FIX: normalize values
-      const finalScore = aiData.final_score ?? aiData.score ?? 0;
+      // ✅ SAFE VALUES (NO NaN EVER)
+      const finalScore = Number(aiData.final_score ?? aiData.score ?? 0) || 0;
       const feedback = aiData.result ?? aiData.feedback ?? "";
 
-      // ✅ SAVE TO DB (NO NULL BUG)
-      await pool.query(
+      const semantic = Number(aiData.semantic_score) || 0;
+      const smith = Number(aiData.smith_score) || 0;
+
+      // ✅ INSERT ANSWER
+      const inserted = await client.query(
         `INSERT INTO answers 
         (candidate_id, question_id, answer_text, ai_score, ai_feedback, session_id, semantic_score, smith_score, role_id, company_id) 
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+        RETURNING *`,
         [
           candidateId,
           ans.questionId,
@@ -87,12 +99,14 @@ export const evaluateAnswers = async (req, res) => {
           finalScore,
           feedback,
           sessionId,
-          aiData.semantic_score || 0,
-          aiData.smith_score || 0,
+          semantic,
+          smith,
           roleId || null,
           companyId || null,
         ]
       );
+
+      console.log("✅ INSERTED:", inserted.rows[0]);
 
       results.push({
         questionId: ans.questionId,
@@ -102,40 +116,54 @@ export const evaluateAnswers = async (req, res) => {
         result: feedback,
       });
 
-      totalSum += parseFloat(finalScore);
+      totalSum += finalScore;
     }
 
-    // ✅ SAFE AVERAGE
-    const overallScore =
-      results.length > 0
-        ? (totalSum / results.length).toFixed(2)
-        : 0;
+    // ✅ SAFE AVERAGE (NO NaN)
+    let overallScore =
+      results.length > 0 ? totalSum / results.length : 0;
 
-    // ✅ SAVE SUMMARY
-    await pool.query(
+    overallScore = Number(overallScore.toFixed(2)) || 0;
+
+    // ✅ UPSERT REPORT (NO CRASH)
+    await client.query(
       `INSERT INTO candidate_reports (candidate_id, session_id, total_score) 
-       VALUES ($1,$2,$3)`,
+       VALUES ($1,$2,$3)
+       ON CONFLICT (session_id) DO UPDATE
+       SET total_score = EXCLUDED.total_score`,
       [candidateId, sessionId, overallScore]
     );
 
+    await client.query("COMMIT");
+
+    console.log("✅ REPORT SAVED");
+
     res.json({
       sessionId,
-      overallScore: parseFloat(overallScore),
+      overallScore,
       results,
     });
 
   } catch (err) {
-    console.error("Evaluation Error:", err);
+    await client.query("ROLLBACK");
+    console.error("❌ Evaluation Error FULL:", err);
+
     res.status(500).json({ error: "Evaluation failed" });
+
+  } finally {
+    client.release();
   }
 };
 
 
+
 // ==============================
-// 2. FINAL REPORT (TOPIC ANALYSIS)
+// 2. Generate Final Report
 // ==============================
 export const generateFinalReport = async (req, res) => {
   try {
+    console.log("🔥 ANALYZE ROUTE HIT");
+
     const { candidateId } = req.params;
     const { sessionId } = req.query;
 
@@ -145,7 +173,7 @@ export const generateFinalReport = async (req, res) => {
 
     let targetSession = sessionId;
 
-    // ✅ Get latest session if not provided
+    // Get latest session if not provided
     if (!targetSession) {
       const latest = await pool.query(
         `SELECT session_id 
@@ -161,13 +189,11 @@ export const generateFinalReport = async (req, res) => {
 
     if (!targetSession) {
       return res.status(404).json({
-        error: "No sessions found for this candidate",
+        error: "No sessions found",
       });
     }
 
-    // ==============================
-    // FETCH DATA
-    // ==============================
+    // Fetch answers
     const dbData = await pool.query(
       `SELECT q.question_text, q.expected_answer, a.answer_text, 
               COALESCE(sub.subject_name, 'General Technical') as topic
@@ -181,44 +207,36 @@ export const generateFinalReport = async (req, res) => {
 
     if (dbData.rows.length === 0) {
       return res.status(404).json({
-        error: "No answers found for this session",
+        error: "No answers found",
       });
     }
 
-    const questionsForAI = dbData.rows.map((r) => ({
-      question: r.question_text,
-      answer: r.expected_answer,
-      topic: r.topic,
-    }));
-
-    // ==============================
-    // AI CALL
-    // ==============================
+    // AI analysis
     const analysisResponse = await axios.post(
       `${AI_API}/analyze-topics`,
       {
-        questions: questionsForAI,
+        questions: dbData.rows.map((r) => ({
+          question: r.question_text,
+          answer: r.expected_answer,
+          topic: r.topic,
+        })),
         user_answers: dbData.rows.map((r) => r.answer_text),
       }
     );
 
     const report = analysisResponse.data;
 
-    // ==============================
-    // CALCULATE SCORE
-    // ==============================
     const avgValues = Object.values(report.topic_average || {});
-    const totalScore =
+
+    let totalScore =
       avgValues.length > 0
-        ? (
-            avgValues.reduce((a, b) => a + b, 0) / avgValues.length
-          ).toFixed(2)
+        ? avgValues.reduce((a, b) => a + b, 0) / avgValues.length
         : 0;
 
-    // ==============================
-    // SAVE REPORT (UPSERT)
-    // ==============================
-    const savedReport = await pool.query(
+    totalScore = Number(totalScore.toFixed(2)) || 0;
+
+    // ✅ UPSERT FINAL REPORT
+    const saved = await pool.query(
       `INSERT INTO candidate_reports 
         (candidate_id, session_id, topic_averages, classifications, pagerank_importance, total_score) 
         VALUES ($1,$2,$3,$4,$5,$6) 
@@ -240,11 +258,11 @@ export const generateFinalReport = async (req, res) => {
 
     res.json({
       message: "Analysis successful",
-      report: savedReport.rows[0],
+      report: saved.rows[0],
     });
 
   } catch (err) {
-    console.error("Analysis Error:", err);
+    console.error("❌ Analysis Error FULL:", err);
     res.status(500).json({ error: "Analysis failed" });
   }
 };
