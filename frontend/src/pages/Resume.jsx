@@ -15,25 +15,34 @@ export default function ResumeAnalyzer() {
     formData.append("role", role);
 
     setLoading(true);
+    setResult(null); // Clear previous results
 
     try {
+      // UPDATED URL: Added /api/resume to match your server.js configuration
       const res = await axios.post(
-        "http://localhost:5000/analyze-resume",
-        formData
+        "http://localhost:5000/api/resume/analyze-resume",
+        formData,
+        {
+          headers: {
+            "Content-Type": "multipart/form-data",
+          },
+        }
       );
 
       setResult(res.data);
     } catch (err) {
-      console.log(err);
-      alert("Analysis failed");
+      console.error("Analysis Error:", err.response || err);
+      
+      // Better error messaging
+      const errorMsg = err.response?.data?.error || "Analysis failed. Please check backend logs.";
+      alert(errorMsg);
+    } finally {
+      setLoading(false);
     }
-
-    setLoading(false);
   };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-black text-white p-8">
-
       {/* HEADER */}
       <h1 className="text-4xl font-bold text-center mb-8">
         🚀 AI Resume Analyzer
@@ -41,11 +50,11 @@ export default function ResumeAnalyzer() {
 
       {/* CARD */}
       <div className="max-w-2xl mx-auto bg-gray-900 p-6 rounded-2xl shadow-xl border border-gray-700">
-
+        
         {/* ROLE SELECT */}
-        <label className="block mb-2">Select Role</label>
+        <label className="block mb-2 font-semibold">Select Role</label>
         <select
-          className="w-full p-3 rounded bg-gray-800 mb-4"
+          className="w-full p-3 rounded bg-gray-800 mb-4 border border-gray-600 focus:outline-none focus:border-blue-500"
           value={role}
           onChange={(e) => setRole(e.target.value)}
         >
@@ -55,54 +64,61 @@ export default function ResumeAnalyzer() {
         </select>
 
         {/* FILE INPUT */}
+        <label className="block mb-2 font-semibold">Upload Resume (PDF)</label>
         <input
           type="file"
-          className="w-full p-3 bg-gray-800 rounded mb-4"
+          accept=".pdf"
+          className="w-full p-3 bg-gray-800 rounded mb-4 border border-gray-600"
           onChange={(e) => setFile(e.target.files[0])}
         />
 
         {/* BUTTON */}
         <button
           onClick={handleAnalyze}
-          className="w-full bg-blue-600 hover:bg-blue-700 p-3 rounded font-bold"
+          disabled={loading}
+          className={`w-full p-3 rounded font-bold transition ${
+            loading 
+              ? "bg-gray-600 cursor-not-allowed" 
+              : "bg-blue-600 hover:bg-blue-700"
+          }`}
         >
           {loading ? "Analyzing..." : "Analyze Resume"}
         </button>
       </div>
 
-      {/* RESULT */}
+      {/* RESULT SECTION */}
       {result && (
         <div className="max-w-3xl mx-auto mt-8 space-y-6">
-
           {/* SCORE CARD */}
           <div className="bg-gray-900 p-6 rounded-2xl border border-gray-700 text-center">
             <h2 className="text-xl mb-2">Resume Score</h2>
-
             <div className="text-6xl font-bold text-green-400">
-              {result.score}
+              {result.score}/100
             </div>
-
             <p className="text-gray-400 mt-2">
-              Role Detected: {result.role_detected}
+              Role Detected: <span className="text-white capitalize">{result.role_detected || role}</span>
             </p>
           </div>
 
           {/* FEEDBACK */}
           <div className="bg-gray-900 p-6 rounded-2xl border border-gray-700">
-            <h2 className="text-xl mb-4">AI Feedback</h2>
-
+            <h2 className="text-xl mb-4 font-bold">AI Feedback</h2>
             <div className="grid gap-3">
-              {result.feedback.map((item, index) => (
-                <div
-                  key={index}
-                  className="bg-gray-800 p-3 rounded-lg border border-gray-700"
-                >
-                  ❌ {item}
-                </div>
-              ))}
+              {result.feedback && result.feedback.length > 0 ? (
+                result.feedback.map((item, index) => (
+                  <div
+                    key={index}
+                    className="bg-gray-800 p-3 rounded-lg border border-gray-700 flex items-start gap-2"
+                  >
+                    <span className="text-red-400">❌</span>
+                    <span>{item}</span>
+                  </div>
+                ))
+              ) : (
+                <p className="text-green-400">Perfect! No major improvements needed.</p>
+              )}
             </div>
           </div>
-
         </div>
       )}
     </div>

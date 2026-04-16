@@ -5,30 +5,25 @@ import axios from "axios";
 const AI_API = process.env.AI_API_URL || "http://localhost:8000";
 
 // ==============================
-// 1. Evaluate Answers
+// 1. Evaluate Answers (FINAL FIXED)
 // ==============================
 export const evaluateAnswers = async (req, res) => {
   try {
     const { candidateId, answers, roleId, companyId } = req.body;
 
-    // ✅ Validation
     if (!candidateId || !answers?.length) {
       return res.status(400).json({
         error: "candidateId and answers are required",
       });
     }
 
-    // ✅ Unique sessionId
+    // ✅ UNIQUE SESSION ID
     const sessionId = `${candidateId}-${Date.now()}`;
 
-    const results = [];
-    let totalSum = 0;
-
-    // Default names
     let selectedRoleName = "Academic/VTU";
     let selectedCompanyName = "General Practice";
 
-    // Fetch role name
+    // ✅ Fetch role name
     if (roleId) {
       const roleRes = await pool.query(
         "SELECT role_name FROM roles WHERE id = $1",
@@ -37,7 +32,7 @@ export const evaluateAnswers = async (req, res) => {
       selectedRoleName = roleRes.rows[0]?.role_name || selectedRoleName;
     }
 
-    // Fetch company name
+    // ✅ Fetch company name
     if (companyId) {
       const compRes = await pool.query(
         "SELECT company_name FROM companies WHERE id = $1",
@@ -47,7 +42,7 @@ export const evaluateAnswers = async (req, res) => {
         compRes.rows[0]?.company_name || selectedCompanyName;
     }
 
-    // ✅ Fetch all expected answers in one query (performance optimization)
+    // ✅ Fetch all expected answers (OPTIMIZED)
     const questionIds = answers.map((a) => a.questionId);
 
     const questionData = await pool.query(
@@ -60,8 +55,11 @@ export const evaluateAnswers = async (req, res) => {
       questionMap[q.id] = q.expected_answer;
     });
 
+    const results = [];
+    let totalSum = 0;
+
     // ==============================
-    // Loop through answers
+    // LOOP
     // ==============================
     for (const ans of answers) {
       const expected = questionMap[ans.questionId] || "";
@@ -73,7 +71,11 @@ export const evaluateAnswers = async (req, res) => {
         selectedCompanyName
       );
 
-      // Save to DB
+      // ✅ IMPORTANT FIX: normalize values
+      const finalScore = aiData.final_score ?? aiData.score ?? 0;
+      const feedback = aiData.result ?? aiData.feedback ?? "";
+
+      // ✅ SAVE TO DB (NO NULL BUG)
       await pool.query(
         `INSERT INTO answers 
         (candidate_id, question_id, answer_text, ai_score, ai_feedback, session_id, semantic_score, smith_score, role_id, company_id) 
@@ -82,8 +84,8 @@ export const evaluateAnswers = async (req, res) => {
           candidateId,
           ans.questionId,
           ans.answerText,
-          aiData.final_score || 0,
-          aiData.result || "",
+          finalScore,
+          feedback,
           sessionId,
           aiData.semantic_score || 0,
           aiData.smith_score || 0,
@@ -96,20 +98,20 @@ export const evaluateAnswers = async (req, res) => {
         questionId: ans.questionId,
         role: selectedRoleName,
         company: selectedCompanyName,
-        final_score: aiData.final_score || 0,
-        result: aiData.result || "",
+        final_score: finalScore,
+        result: feedback,
       });
 
-      totalSum += parseFloat(aiData.final_score || 0);
+      totalSum += parseFloat(finalScore);
     }
 
-    // ✅ Correct average calculation
+    // ✅ SAFE AVERAGE
     const overallScore =
       results.length > 0
         ? (totalSum / results.length).toFixed(2)
         : 0;
 
-    // Save summary report
+    // ✅ SAVE SUMMARY
     await pool.query(
       `INSERT INTO candidate_reports (candidate_id, session_id, total_score) 
        VALUES ($1,$2,$3)`,
@@ -128,22 +130,22 @@ export const evaluateAnswers = async (req, res) => {
   }
 };
 
+
 // ==============================
-// 2. Generate Final Report (Topic Analysis)
+// 2. FINAL REPORT (TOPIC ANALYSIS)
 // ==============================
 export const generateFinalReport = async (req, res) => {
   try {
     const { candidateId } = req.params;
     const { sessionId } = req.query;
 
-    // ✅ Validate
     if (!candidateId) {
       return res.status(400).json({ error: "candidateId required" });
     }
 
     let targetSession = sessionId;
 
-    // If no sessionId, fetch latest
+    // ✅ Get latest session if not provided
     if (!targetSession) {
       const latest = await pool.query(
         `SELECT session_id 
@@ -164,7 +166,7 @@ export const generateFinalReport = async (req, res) => {
     }
 
     // ==============================
-    // Fetch data for analysis
+    // FETCH DATA
     // ==============================
     const dbData = await pool.query(
       `SELECT q.question_text, q.expected_answer, a.answer_text, 
@@ -190,7 +192,7 @@ export const generateFinalReport = async (req, res) => {
     }));
 
     // ==============================
-    // Call AI for topic analysis
+    // AI CALL
     // ==============================
     const analysisResponse = await axios.post(
       `${AI_API}/analyze-topics`,
@@ -203,7 +205,7 @@ export const generateFinalReport = async (req, res) => {
     const report = analysisResponse.data;
 
     // ==============================
-    // Calculate total score safely
+    // CALCULATE SCORE
     // ==============================
     const avgValues = Object.values(report.topic_average || {});
     const totalScore =
@@ -214,7 +216,7 @@ export const generateFinalReport = async (req, res) => {
         : 0;
 
     // ==============================
-    // Save / Update report
+    // SAVE REPORT (UPSERT)
     // ==============================
     const savedReport = await pool.query(
       `INSERT INTO candidate_reports 

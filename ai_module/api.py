@@ -21,7 +21,6 @@ from pagerank import pagerank_topics
 # APP SETUP
 # =============================
 app = FastAPI()
-
 logging.basicConfig(level=logging.INFO)
 
 # =============================
@@ -79,7 +78,7 @@ def evaluate(req: AnswerRequest):
             role=req.role,
             company=req.company
         )
-    except Exception as e:
+    except Exception:
         logging.error(traceback.format_exc())
         return {"error": "Evaluation failed"}
 
@@ -116,7 +115,7 @@ def analyze(req: TopicAnalysisRequest):
         }
 
 # =============================
-# 🚀 RESUME ANALYSIS (STABLE + AI SAFE)
+# RESUME ANALYSIS
 # =============================
 @app.post("/analyze-resume")
 def analyze_resume(req: ResumeRequest):
@@ -127,22 +126,17 @@ def analyze_resume(req: ResumeRequest):
         if not text:
             return {"score": 0, "feedback": ["Empty resume"]}
 
-        # ==============================
-        # ROLE SKILL MAP (STRICT AI RULES)
-        # ==============================
         ROLE_REQUIREMENTS = {
             "backend": {
                 "must_have": ["node", "express", "api", "database"],
                 "nice_to_have": ["jwt", "authentication", "rest", "mongodb", "sql"],
                 "soft_skills": ["problem solving", "communication"]
             },
-
             "data scientist": {
                 "must_have": ["python", "machine learning", "pandas", "numpy"],
                 "nice_to_have": ["statistics", "visualization", "data analysis"],
                 "soft_skills": ["problem solving", "analytical thinking"]
             },
-
             "software engineer": {
                 "must_have": ["data structures", "algorithms", "system design"],
                 "nice_to_have": ["api", "projects", "development"],
@@ -150,7 +144,6 @@ def analyze_resume(req: ResumeRequest):
             }
         }
 
-        # detect role
         role_key = "software engineer"
         for r in ROLE_REQUIREMENTS:
             if r in role:
@@ -158,68 +151,41 @@ def analyze_resume(req: ResumeRequest):
 
         rules = ROLE_REQUIREMENTS[role_key]
 
-        # ==============================
-        # START FROM 100 (REALISTIC SCORING)
-        # ==============================
         score = 100
         feedback = []
 
-        # ==============================
-        # MUST HAVE (HIGH PENALTY)
-        # ==============================
         for skill in rules["must_have"]:
             if skill not in text:
                 score -= 15
                 feedback.append(f"Missing core skill: {skill}")
 
-        # ==============================
-        # NICE TO HAVE (MEDIUM PENALTY)
-        # ==============================
         for skill in rules["nice_to_have"]:
             if skill not in text:
                 score -= 6
                 feedback.append(f"Add skill: {skill}")
 
-        # ==============================
-        # SOFT SKILLS (SMALL BONUS ONLY)
-        # ==============================
         for skill in rules["soft_skills"]:
             if skill in text:
                 score += 2
 
-        # ==============================
-        # PROJECT CHECK
-        # ==============================
         if "project" not in text:
             score -= 10
-            feedback.append("Add internship/projects experience")
+            feedback.append("Add projects experience")
 
-        # ==============================
-        # INTERNSHIP CHECK
-        # ==============================
         if "intern" not in text:
             score -= 12
             feedback.append("Add internship experience")
 
-        # ==============================
-        # ACHIEVEMENT CHECK
-        # ==============================
         if not any(w in text for w in ["built", "developed", "led", "optimized"]):
             score -= 8
             feedback.append("Add measurable achievements")
 
-        # ==============================
-        # POSITIVE SIGNALS (SMALL BOOST ONLY)
-        # ==============================
         if any(w in text for w in ["built", "developed", "led"]):
             score += 3
 
         if any(char.isdigit() for char in text):
-            score += 3  # numbers = impact
+            score += 3
 
-        # ==============================
-        # FINAL CLAMP (IMPORTANT)
-        # ==============================
         score = max(0, min(100, score))
 
         return {

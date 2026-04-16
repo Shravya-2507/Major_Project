@@ -1,12 +1,10 @@
 import axios from "axios";
 
-// Base AI API URL (keep in .env for flexibility)
 const AI_API = process.env.AI_API_URL || "http://localhost:8000";
 
-// Reusable axios instance (better than calling axios directly)
 const api = axios.create({
   baseURL: AI_API,
-  timeout: 5000,
+  timeout: 10000,
   headers: {
     "Content-Type": "application/json",
   },
@@ -15,41 +13,68 @@ const api = axios.create({
 // ==============================
 // Evaluate Answer using AI
 // ==============================
-export const evaluateAnswer = async (userAnswer, expectedAnswer) => {
+export const evaluateAnswer = async (
+  userAnswer,
+  expectedAnswer,
+  role = "General",
+  company = "General"
+) => {
   try {
-    // Basic validation
     if (!userAnswer || !expectedAnswer) {
       return {
+        // ✅ New format
+        final_score: 0,
+        result: "Invalid input",
+
+        // ✅ Old format compatibility
         score: 0,
-        feedback: "Invalid input provided",
+        feedback: "Invalid input",
+
+        semantic_score: 0,
+        smith_score: 0,
       };
     }
 
     const response = await api.post("/evaluate", {
       student_answer: userAnswer,
       correct_answer: expectedAnswer,
+      role,
+      company,
     });
 
     const data = response.data;
 
+    const finalScore = data.final_score || 0;
+    const resultText = data.result || "No feedback";
+
     return {
-      // Normalize score (0–10 scale)
-      score: Math.round((data.final_score || 0) * 10),
-      feedback: data.result || "No feedback provided",
+      // ✅ PRIMARY (new system)
+      final_score: finalScore,
+      result: resultText,
+      semantic_score: data.semantic_score || 0,
+      smith_score: data.smith_score || 0,
+
+      // ✅ BACKWARD COMPATIBILITY (old system)
+      score: Math.round(finalScore * 10), // if you used /10 scale before
+      feedback: resultText,
     };
 
   } catch (error) {
-    // Detailed logging for debugging
     console.error("AI Evaluation Error:", {
       message: error.message,
       status: error.response?.status,
       data: error.response?.data,
     });
 
-    // Graceful fallback for frontend
     return {
+      final_score: 0,
+      result: "AI evaluation failed",
+
       score: 0,
-      feedback: "AI evaluation failed. Please try again.",
+      feedback: "AI evaluation failed",
+
+      semantic_score: 0,
+      smith_score: 0,
     };
   }
 };
