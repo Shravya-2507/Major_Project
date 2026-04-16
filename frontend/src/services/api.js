@@ -9,6 +9,32 @@ const handleResponse = async (res) => {
   return res.json();
 };
 
+export const fetchRoles = async (companyId) => {
+  try {
+    // If companyId is empty, 'general', or null, fetch the full list
+    const url = (!companyId || companyId === "general") 
+      ? `${BASE_URL}/roles` 
+      : `${BASE_URL}/companies/${companyId}/roles`;
+
+    const res = await fetch(url);
+    return await handleResponse(res);
+  } catch (err) {
+    console.error("Fetch Roles Error:", err.message);
+    return []; // Return empty array so .map() doesn't crash
+  }
+};
+
+export const fetchCompanies = async () => {
+  try {
+    // Change this from /questions/companies to just /companies
+    const res = await fetch(`${BASE_URL}/companies`);
+    return await handleResponse(res);
+  } catch (err) {
+    console.error("Fetch Companies Error:", err.message);
+    throw err;
+  }
+};
+
 // ==============================
 // 1. Get Questions
 // ==============================

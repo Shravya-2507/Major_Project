@@ -7,6 +7,9 @@ import interviewRoutes from "./routes/interviewRoutes.js";
 import questionRoutes from "./routes/questionRoutes.js";
 import pool from "./config/db.js";
 import resumeRoutes from "./routes/resumeRoutes.js";
+import selectionRoutes from "./routes/selectionRoutes.js";
+
+
 
 const app = express();
 
@@ -21,6 +24,7 @@ app.use(express.json());
 app.use("/api/interview", interviewRoutes);
 app.use("/api/questions", questionRoutes);
 app.use("/api/resume", resumeRoutes);
+app.use("/api", selectionRoutes);
 
 // 404 handler
 app.use((req, res) => {
