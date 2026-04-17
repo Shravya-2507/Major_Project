@@ -67,21 +67,37 @@ export default function Interview() {
   try {
     setIsSubmitting(true);
 
+    // 1. Get the logged-in user from localStorage
+    const savedUser = localStorage.getItem("user");
+    const user = savedUser ? JSON.parse(savedUser) : null;
+
+    // 2. Safety Check: If no user is found, don't allow submission
+    if (!user || !user.id) {
+      alert("Session expired. Please log in again.");
+      navigate("/login");
+      return;
+    }
+
+    // 3. Create the payload using the dynamic user.id
     const payload = {
-      candidateId: 1,
+      candidateId: user.id, // <--- CHANGED FROM 1 TO DYNAMIC ID
+      roleId: roleId,       // Add this (from location.state)
+      companyId: companyId,
       answers: questions.map((q, index) => ({
         questionId: q.id,
         answerText: answers[index] || ""
       }))
     };
 
-    // 1. Set a timeout or catch errors properly
     const result = await submitAnswers(payload); 
 
     if (result && (result.sessionId || result.session_id)) {
+      // Clear session storage so a new interview can start next time
+      sessionStorage.removeItem("current_interview_questions");
+
       navigate("/feedback", { 
         state: { 
-          candidateId: payload.candidateId, 
+          candidateId: user.id, // Use dynamic ID for feedback too
           sessionId: result.sessionId || result.session_id 
         } 
       });
@@ -91,8 +107,8 @@ export default function Interview() {
 
   } catch (err) {
     console.error("Submission failed:", err);
-    alert("Submission failed. Please check your backend terminal for errors.");
-    setIsSubmitting(false); // This UNSTUCKS the screen
+    alert("Submission failed. Please try again.");
+    setIsSubmitting(false); 
   }
 };
   // UI STATE: Initial Question Loading

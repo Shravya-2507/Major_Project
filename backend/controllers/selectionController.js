@@ -41,3 +41,28 @@ export const getRolesByCompany = async (req, res) => {
     res.status(500).json({ error: "Failed to fetch filtered roles" });
   }
 };
+
+
+export const getVtuQuestions = async (req, res) => {
+  try {
+    // We target questions where syllabus_id is present (VTU questions)
+    const query = `
+      SELECT id, question_text, expected_answer 
+      FROM questions 
+      WHERE syllabus_id IS NOT NULL 
+      ORDER BY RANDOM() 
+      LIMIT 10
+    `;
+    
+    const result = await pool.query(query);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: "No VTU questions found." });
+    }
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error("❌ Selection Controller Error:", err.message);
+    res.status(500).json({ error: "Failed to fetch VTU questions" });
+  }
+};

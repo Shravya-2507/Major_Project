@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom";
-import { Code, Building2 } from "lucide-react";
+import { Code, BookOpen } from "lucide-react";
 
 export default function Practice() {
   const navigate = useNavigate();
@@ -11,7 +11,7 @@ export default function Practice() {
       <div className="grid md:grid-cols-2 gap-6">
         {/* Coding */}
         <div
-          onClick={() => navigate("/test/coding")}
+          onClick={() => navigate("/tes/coding")}
           className="p-6 rounded-xl shadow hover:shadow-lg cursor-pointer bg-white"
         >
           <Code className="mb-3 text-blue-500" size={28} />
@@ -23,13 +23,13 @@ export default function Practice() {
 
         {/* Company */}
         <div
-          onClick={() => navigate("/company")}
-          className="p-6 rounded-xl shadow hover:shadow-lg cursor-pointer bg-white"
+          onClick={() => navigate("/test/vtu")}
+          className="p-6 rounded-xl shadow hover:shadow-lg cursor-pointer bg-white transition-all"
         >
-          <Building2 className="mb-3 text-purple-500" size={28} />
-          <h3 className="text-lg font-semibold">Company Specific</h3>
+          <BookOpen className="mb-3 text-purple-500" size={28} />
+          <h3 className="text-lg font-semibold">VTU Modules</h3>
           <p className="text-gray-500 text-sm">
-            Practice company-based tests
+            Practice VTU-based curriculum tests
           </p>
         </div>
       </div>

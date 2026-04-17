@@ -8,6 +8,8 @@ import questionRoutes from "./routes/questionRoutes.js";
 import pool from "./config/db.js";
 import resumeRoutes from "./routes/resumeRoutes.js";
 import selectionRoutes from "./routes/selectionRoutes.js";
+import authRoutes from "./routes/authRoutes.js";
+
 
 
 
@@ -25,6 +27,8 @@ app.use("/api/interview", interviewRoutes);
 app.use("/api/questions", questionRoutes);
 app.use("/api/resume", resumeRoutes);
 app.use("/api", selectionRoutes);
+app.use("/api/auth", authRoutes);
+
 
 // 404 handler
 app.use((req, res) => {

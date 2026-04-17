@@ -9,6 +9,24 @@ const handleResponse = async (res) => {
   return res.json();
 };
 
+export const signupUser = async (userData) => {
+  const res = await fetch(`${BASE_URL}/auth/signup`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(userData),
+  });
+  return await handleResponse(res);
+};
+
+export const loginUser = async (credentials) => {
+  const res = await fetch(`${BASE_URL}/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(credentials),
+  });
+  return await handleResponse(res);
+};
+
 export const fetchRoles = async (companyId) => {
   try {
     // If companyId is empty, 'general', or null, fetch the full list
@@ -49,6 +67,19 @@ export const fetchQuestions = async (data) => {
     return await handleResponse(res);
   } catch (err) {
     console.error("Fetch Questions Error:", err.message);
+    throw err;
+  }
+};
+
+export const fetchVtuQuestions = async () => {
+  try {
+    // Using the native fetch API and your existing BASE_URL
+    const res = await fetch(`${BASE_URL}/vtu-questions`);
+    
+    // Using your existing handleResponse helper
+    return await handleResponse(res);
+  } catch (err) {
+    console.error("Fetch VTU Questions Error:", err.message);
     throw err;
   }
 };

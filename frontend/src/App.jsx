@@ -12,7 +12,6 @@ import Dashboard from "./pages/Dashboard";
 import Resume from "./pages/Resume";
 import Practice from "./pages/Practice";
 import Test from "./pages/Test";
-import CompanySelect from "./pages/CompanySelect";
 import CodingTest from "./pages/CodingTest";
 import MockInterview from "./pages/MockInterview";
 import Interview from "./pages/Interview";
@@ -31,14 +30,13 @@ function App() {
       <Route path="/dashboard" element={<DashboardLayout><Dashboard /></DashboardLayout>} />
       <Route path="/resume" element={<DashboardLayout><Resume /></DashboardLayout>} />
       <Route path="/practice" element={<DashboardLayout><Practice /></DashboardLayout>} />
-      <Route path="/company" element={<DashboardLayout><CompanySelect /></DashboardLayout>} />
       <Route path="/mock-interview" element={<DashboardLayout><MockInterview /></DashboardLayout>} />
-      
       <Route path="/test/:type" element={<DashboardLayout><Test /></DashboardLayout>} />
       <Route path="/test/:type/:company" element={<DashboardLayout><Test /></DashboardLayout>} />
       <Route path="/coding" element={<DashboardLayout><CodingTest /></DashboardLayout>} />
       <Route path="/interview" element={<DashboardLayout><Interview /></DashboardLayout>} />
       <Route path="/feedback" element={<DashboardLayout><Feedback /></DashboardLayout>} />
+      <Route path="/test/vtu" element={<Test />} />
 
     </Routes>
   );
