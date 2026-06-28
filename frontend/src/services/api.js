@@ -138,3 +138,41 @@ export const analyzeResume = async (file, role = "") => {
     throw err;
   }
 };
+
+// ============================
+// Coding API Functions
+// ============================
+// api.js
+export const codingAPI = {
+  getQuestions: async () => {
+    // This calls http://localhost:5000/api/questions/coding
+    const res = await fetch(`${BASE_URL}/questions/coding`); 
+    return await handleResponse(res);
+  },
+  
+  runCode: async (code, language, input = "") => {
+    // This matches app.use("/api/code", codeRunnerRoutes) + router.post("/run")
+    const res = await fetch(`${BASE_URL}/code/run`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code, language, input }),
+    });
+    return await handleResponse(res);
+  },
+
+  // services/api.js
+// Change API_URL to BASE_URL
+submitCode: async (code, language, questionId, testCases) => {
+  const response = await fetch(`${BASE_URL}/code/submit`, { // Changed this line
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ 
+      code, 
+      language, 
+      questionId, 
+      testCases 
+    }),
+  });
+  return await handleResponse(response); // Added await for consistency
+},
+};

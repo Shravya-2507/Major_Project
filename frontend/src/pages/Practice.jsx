@@ -10,16 +10,17 @@ export default function Practice() {
 
       <div className="grid md:grid-cols-2 gap-6">
         {/* Coding */}
-        <div
-          onClick={() => navigate("/tes/coding")}
-          className="p-6 rounded-xl shadow hover:shadow-lg cursor-pointer bg-white"
-        >
-          <Code className="mb-3 text-blue-500" size={28} />
-          <h3 className="text-lg font-semibold">Coding Problems</h3>
-          <p className="text-gray-500 text-sm">
-            Solve coding questions (VTU + DSA)
-          </p>
-        </div>
+          <div
+            // Change "/tes/coding" to "/test/coding"
+            onClick={() => navigate("/test/coding")} 
+            className="p-6 rounded-xl shadow hover:shadow-lg cursor-pointer bg-white"
+          >
+            <Code className="mb-3 text-blue-500" size={28} />
+            <h3 className="text-lg font-semibold">Coding Problems</h3>
+            <p className="text-gray-500 text-sm">
+              Solve coding questions (VTU + DSA)
+            </p>
+          </div>
 
         {/* Company */}
         <div

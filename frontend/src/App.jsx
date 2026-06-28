@@ -30,6 +30,7 @@ function App() {
       <Route path="/dashboard" element={<DashboardLayout><Dashboard /></DashboardLayout>} />
       <Route path="/resume" element={<DashboardLayout><Resume /></DashboardLayout>} />
       <Route path="/practice" element={<DashboardLayout><Practice /></DashboardLayout>} />
+      <Route path="/test/coding" element={<CodingTest />} />
       <Route path="/mock-interview" element={<DashboardLayout><MockInterview /></DashboardLayout>} />
       <Route path="/test/:type" element={<DashboardLayout><Test /></DashboardLayout>} />
       <Route path="/test/:type/:company" element={<DashboardLayout><Test /></DashboardLayout>} />
