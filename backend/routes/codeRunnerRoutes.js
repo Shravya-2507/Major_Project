@@ -1,110 +1,162 @@
 import express from "express";
-import { spawn } from "child_process";
-import fs from "fs";
 import { pool } from "../db.js";
+import { executeCode, runTestCases } from "../services/evaluationService.js";
+
 const router = express.Router();
 
-/* ================= RUN CODE ================= */
-router.post("/run", (req, res) => {
-  const { code, language, input = "" } = req.body;
+/* ==========================================================
+   GET NEXT NON-REPEATING CODING QUESTIONS (STRICTLY 3)
+========================================================== */
+router.get("/next", async (req, res) => {
+  try {
+    const candidateId = Number(req.query.candidateId || 1);
+    const difficulty = req.query.difficulty ? String(req.query.difficulty) : null;
+    
+    // Force the limit strictly to 3 questions at a time
+    const limit = 3;
 
-  runCode(code, language, input, (output, error) => {
+    // 1. Find all question IDs this candidate has already solved successfully
+    const solvedRes = await pool.query(
+      `SELECT DISTINCT question_id 
+       FROM coding_submissions 
+       WHERE candidate_id = $1 AND (status = 'ACCEPTED' OR status = 'AC' OR score = 100)`,
+      [candidateId]
+    );
+
+    const solvedIds = solvedRes.rows.map((row) => row.question_id);
+
+    // 2. Build dynamic query for CodingQuestion table using exact column casing with double quotes
+    let query = `
+      SELECT 
+        id, 
+        title, 
+        description, 
+        difficulty, 
+        constraints, 
+        tags, 
+        "sampleInput", 
+        "sampleOutput", 
+        "sampleTestCases", 
+        "hiddenTestCases"
+      FROM "CodingQuestion"
+      WHERE 1=1
+    `;
+
+    const values = [];
+    let counter = 1;
+
+    // Exclude already solved questions so they never repeat
+    if (solvedIds.length > 0) {
+      query += ` AND id != ANY($${counter++}::int[])`;
+      values.push(solvedIds);
+    }
+
+    // Difficulty filter (Easy, Medium, Hard)
+    if (difficulty) {
+      query += ` AND difficulty = $${counter++}`;
+      values.push(difficulty);
+    }
+
+    // Randomize and strictly limit results to 3
+    query += ` ORDER BY RANDOM() LIMIT $${counter}`;
+    values.push(limit);
+
+    const result = await pool.query(query, values);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        message: "Congratulations! You have solved all available coding questions.",
+      });
+    }
+
+    // Always return an array of up to 3 questions
+    res.json(result.rows);
+
+  } catch (err) {
+    console.error("Error fetching next coding questions:", err);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+/* ================= RUN CODE (Preview) ================= */
+router.post("/run", async (req, res) => {
+  const { code, language_id, input = "" } = req.body;
+
+  try {
+    const result = await executeCode(code, language_id, input);
     res.json({
-      output: clean(output),
-      error: error ? clean(error) : null,
+      output: result.stdout || "",
+      error: result.stderr || result.compile_output || null,
+      status: result.status?.description || "Completed",
     });
-  });
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Execution failed" });
+  }
 });
 
 /* ================= SUBMIT CODE ================= */
 router.post("/submit", async (req, res) => {
   const {
     code,
-    language,
+    language_id,
     testCases = [],
     questionId,
     candidateId = 1,
   } = req.body;
 
-  if (!code || !language || !questionId) {
+  if (!code || !language_id || !questionId) {
     return res.status(400).json({
-      error: "code, language and questionId are required",
+      error: "code, language_id and questionId are required",
     });
   }
 
   if (!Array.isArray(testCases) || testCases.length === 0) {
     return res.status(400).json({
-      error: "No hidden test cases found for this question",
+      error: "No test cases found for this submission",
     });
   }
 
-  let results = [];
-  let i = 0;
+  try {
+    // Run tests via Judge0 service
+    const results = await runTestCases(code, language_id, testCases);
 
-  const runNext = () => {
-    if (i >= testCases.length) {
-      const passedTests = results.filter((r) => r.passed).length;
-      const totalTests = results.length;
-      const success = totalTests > 0 && passedTests === totalTests;
-      const status = success ? "ACCEPTED" : "FAILED";
-      const score = totalTests > 0 ? Number(((passedTests / totalTests) * 100).toFixed(2)) : 0;
+    const passedTests = results.filter((r) => r.passed).length;
+    const totalTests = results.length;
+    const success = totalTests > 0 && passedTests === totalTests;
+    const status = success ? "ACCEPTED" : "FAILED";
+    const score = totalTests > 0 ? Number(((passedTests / totalTests) * 100).toFixed(2)) : 0;
 
-      pool.query(
-        `INSERT INTO coding_submissions
-          (candidate_id, question_id, language, status, passed_tests, total_tests, score, code, results)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)`,
-        [
-          Number(candidateId) || 1,
-          Number(questionId),
-          language,
-          status,
-          passedTests,
-          totalTests,
-          score,
-          code,
-          JSON.stringify(results),
-        ]
-      )
-        .then(() => {
-          res.json({
-            success,
-            status,
-            passedTests,
-            totalTests,
-            score,
-            results,
-          });
-        })
-        .catch((dbErr) => {
-          console.error("Failed to save coding submission:", dbErr);
-          res.status(500).json({ error: "Submission evaluated but failed to save" });
-        });
+    // Save submission inside Neon DB
+    await pool.query(
+      `INSERT INTO coding_submissions
+        (candidate_id, question_id, language, status, passed_tests, total_tests, score, code, results)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)`,
+      [
+        Number(candidateId) || 1,
+        Number(questionId),
+        String(language_id),
+        status,
+        passedTests,
+        totalTests,
+        score,
+        code,
+        JSON.stringify(results),
+      ]
+    );
 
-      return;
-    }
-
-    const test = testCases[i];
-
-    runCode(code, language, test.input, (output, error) => {
-      const actual = clean(output);
-      const expected = clean(test.output);
-
-    const passed =
-      normalize(actual) === normalize(expected) && normalize(actual) !== "";
-
-      results.push({
-        input: test.input,
-        expected,
-        output: actual || error || "",
-        passed,
-      });
-
-      i++;
-      runNext();
+    res.json({
+      success,
+      status,
+      passedTests,
+      totalTests,
+      score,
+      results,
     });
-  };
 
-  runNext();
+  } catch (dbErr) {
+    console.error("Failed to process or save coding submission:", dbErr);
+    res.status(500).json({ error: "Submission evaluation failed or failed to save" });
+  }
 });
 
 /* ================= GET SUBMISSIONS ================= */
@@ -140,69 +192,4 @@ router.get("/submissions", async (req, res) => {
   }
 });
 
-/* ================= CODE RUNNER ================= */
-function runCode(code, language, input, callback) {
-  const fileName = language === "python" ? "temp.py" : "temp.js";
-  fs.writeFileSync(fileName, code);
-
-  const cmd =
-    language === "python"
-      ? (process.platform === "win32" ? "py" : "python3")
-      : "node";
-
-  const processRun = spawn(cmd, [fileName]);
-
-  let output = "";
-  let error = "";
-  let finished = false;
-
-  const done = (out, err) => {
-    if (finished) return;
-    finished = true;
-    callback(out, err);
-  };
-
-  const timeout = setTimeout(() => {
-    processRun.kill();
-    done("", "Time limit exceeded");
-  }, 3000);
-
-  processRun.stdout.on("data", (data) => {
-    output += data.toString();
-  });
-
-  processRun.stderr.on("data", (data) => {
-    error += data.toString();
-  });
-
-  if (input) {
-    processRun.stdin.write(input + "\n");
-  }
-
-  processRun.stdin.end();
-
-  processRun.on("close", () => {
-    clearTimeout(timeout);
-    done(output, error);
-  });
-
-  processRun.on("error", (err) => {
-    clearTimeout(timeout);
-    done("", err.message);
-  });
-}
-
-/* ================= CLEAN OUTPUT ================= */
-function clean(str) {
-  return (str ?? "").toString().replace(/\r/g, "").trim();
-}
-
-function normalize(str) {
-  return (str ?? "")
-    .toString()
-    .replace(/\r/g, "")
-    .replace(/\n/g, "")
-    .replace(/\s+/g, "")
-    .trim();
-}
 export default router;

@@ -139,40 +139,81 @@ export const analyzeResume = async (file, role = "") => {
   }
 };
 
-// ============================
-// Coding API Functions
-// ============================
-// api.js
 export const codingAPI = {
-  getQuestions: async () => {
-    // This calls http://localhost:5000/api/questions/coding
-    const res = await fetch(`${BASE_URL}/questions/coding`); 
-    return await handleResponse(res);
+  getQuestions: async (candidateId = 1) => {
+    const cacheKey = `active_coding_questions_${candidateId}`;
+    const cached = localStorage.getItem(cacheKey);
+    
+    if (cached) {
+      try {
+        return JSON.parse(cached);
+      } catch (e) {
+        localStorage.removeItem(cacheKey);
+      }
+    }
+
+    const res = await fetch(`${BASE_URL}/code/next?candidateId=${candidateId}`); 
+    const questions = await handleResponse(res);
+    
+    localStorage.setItem(cacheKey, JSON.stringify(questions));
+    return questions;
+  },
+
+  clearSession: (candidateId = 1) => {
+    localStorage.removeItem(`active_coding_questions_${candidateId}`);
+    localStorage.removeItem(`candidate_code_drafts_${candidateId}`);
+  },
+
+  // Save draft code per question so it persists on refresh
+  saveCodeDraft: (questionId, code, candidateId = 1) => {
+    const draftKey = `candidate_code_drafts_${candidateId}`;
+    let drafts = {};
+    try {
+      drafts = JSON.parse(localStorage.getItem(draftKey)) || {};
+    } catch (e) {
+      drafts = {};
+    }
+    drafts[questionId] = code;
+    localStorage.setItem(draftKey, JSON.stringify(drafts));
+  },
+
+  // Retrieve draft code for a specific question on load/refresh
+  getCodeDraft: (questionId, candidateId = 1) => {
+    const draftKey = `candidate_code_drafts_${candidateId}`;
+    try {
+      const drafts = JSON.parse(localStorage.getItem(draftKey)) || {};
+      return drafts[questionId] || "";
+    } catch (e) {
+      return "";
+    }
   },
   
   runCode: async (code, language, input = "") => {
-    // This matches app.use("/api/code", codeRunnerRoutes) + router.post("/run")
     const res = await fetch(`${BASE_URL}/code/run`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code, language, input }),
+      body: JSON.stringify({ 
+        code, 
+        language, 
+        language_id: language, 
+        input 
+      }),
     });
     return await handleResponse(res);
   },
 
-  // services/api.js
-// Change API_URL to BASE_URL
-submitCode: async (code, language, questionId, testCases) => {
-  const response = await fetch(`${BASE_URL}/code/submit`, { // Changed this line
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ 
-      code, 
-      language, 
-      questionId, 
-      testCases 
-    }),
-  });
-  return await handleResponse(response); // Added await for consistency
-},
+  submitCode: async (code, language, questionId, hiddenTestCases, candidateId = 1) => {
+    const response = await fetch(`${BASE_URL}/code/submit`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ 
+        candidateId,
+        questionId,
+        code, 
+        language_id: language, 
+        testCases: hiddenTestCases 
+      }),
+    });
+    return await handleResponse(response);
+  },
 };

@@ -1,9 +1,19 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
 from fastapi.middleware.cors import CORSMiddleware
 import logging
 import traceback
+#from resume import calculate_rag_semantic_match, generate_detailed_feedback
+from resume.semantic_matcher import calculate_rag_semantic_match
+
+from resume.resume_parser import parse_resume
+from resume.ats_analyzer import analyze_ats
+from resume.skill_extractor import compare_skills
+from resume.experience_analyzer import analyze_experience
+from resume.project_analyzer import analyze_projects
+from resume.achievement_analyzer import analyze_achievements
+from resume.feedback_generator import generate_feedback
 
 # =============================
 # AI MODULE IMPORTS
@@ -58,6 +68,7 @@ class TopicAnalysisRequest(BaseModel):
 class ResumeRequest(BaseModel):
     text: str
     role: str = "General"
+    job_description: Optional[str] = None
 
 # =============================
 # ROOT
@@ -117,86 +128,125 @@ def analyze(req: TopicAnalysisRequest):
 # =============================
 # RESUME ANALYSIS
 # =============================
+# Refactored Version with Consistent Error Schema & Async Capability
 @app.post("/analyze-resume")
-def analyze_resume(req: ResumeRequest):
+async def analyze_resume(req: ResumeRequest):
+
     try:
-        text = (req.text or "").lower().strip()
-        role = (req.role or "").lower()
+
+        text = (req.text or "").strip()
+
+        role = (req.role or "").strip()
+
+        jd = (req.job_description or "").strip()
 
         if not text:
-            return {"score": 0, "feedback": ["Empty resume"]}
 
-        ROLE_REQUIREMENTS = {
-            "backend": {
-                "must_have": ["node", "express", "api", "database"],
-                "nice_to_have": ["jwt", "authentication", "rest", "mongodb", "sql"],
-                "soft_skills": ["problem solving", "communication"]
-            },
-            "data scientist": {
-                "must_have": ["python", "machine learning", "pandas", "numpy"],
-                "nice_to_have": ["statistics", "visualization", "data analysis"],
-                "soft_skills": ["problem solving", "analytical thinking"]
-            },
-            "software engineer": {
-                "must_have": ["data structures", "algorithms", "system design"],
-                "nice_to_have": ["api", "projects", "development"],
-                "soft_skills": ["problem solving", "coding"]
+            return {
+                "overall_score": 0,
+                "error": "Resume text is empty."
             }
-        }
 
-        role_key = "software engineer"
-        for r in ROLE_REQUIREMENTS:
-            if r in role:
-                role_key = r
+        # -------------------------------
+        # Parse Resume
+        # -------------------------------
 
-        rules = ROLE_REQUIREMENTS[role_key]
+        parsed_resume = parse_resume(text)
 
-        score = 100
-        feedback = []
+        # -------------------------------
+        # ATS Analysis
+        # -------------------------------
 
-        for skill in rules["must_have"]:
-            if skill not in text:
-                score -= 15
-                feedback.append(f"Missing core skill: {skill}")
+        ats_result = analyze_ats(parsed_resume)
 
-        for skill in rules["nice_to_have"]:
-            if skill not in text:
-                score -= 6
-                feedback.append(f"Add skill: {skill}")
+        # -------------------------------
+        # Skill Analysis
+        # -------------------------------
 
-        for skill in rules["soft_skills"]:
-            if skill in text:
-                score += 2
+        skill_result = compare_skills(
+            text,
+            jd if jd else role
+        )
 
-        if "project" not in text:
-            score -= 10
-            feedback.append("Add projects experience")
+        # -------------------------------
+        # Experience Analysis
+        # -------------------------------
 
-        if "intern" not in text:
-            score -= 12
-            feedback.append("Add internship experience")
+        experience_result = analyze_experience(text)
 
-        if not any(w in text for w in ["built", "developed", "led", "optimized"]):
-            score -= 8
-            feedback.append("Add measurable achievements")
+        # -------------------------------
+        # Project Analysis
+        # -------------------------------
 
-        if any(w in text for w in ["built", "developed", "led"]):
-            score += 3
+        project_result = analyze_projects(text)
 
-        if any(char.isdigit() for char in text):
-            score += 3
+        # -------------------------------
+        # Achievement Analysis
+        # -------------------------------
 
-        score = max(0, min(100, score))
+        achievement_result = analyze_achievements(text)
+
+        # -------------------------------
+        # Semantic Matching
+        # -------------------------------
+
+        semantic_score = calculate_rag_semantic_match(
+            text,
+            role,
+            jd
+        )
+
+        # -------------------------------
+        # Final AI Feedback
+        # -------------------------------
+
+        report = generate_feedback(
+
+            semantic_score,
+
+            ats_result,
+
+            skill_result,
+
+            experience_result,
+
+            project_result,
+
+            achievement_result
+
+        )
 
         return {
-            "role_detected": role_key,
-            "score": round(score, 2),
-            "feedback": list(set(feedback))
+
+            "role": role,
+
+            "evaluation_mode":
+            "AI Resume Analyzer v2",
+
+            "report": report,
+
+            "ats_analysis": ats_result,
+
+            "skill_analysis": skill_result,
+
+            "experience_analysis": experience_result,
+
+            "project_analysis": project_result,
+
+            "achievement_analysis": achievement_result
+
         }
 
     except Exception as e:
+
+        logging.error(traceback.format_exc())
+
         return {
-            "score": 0,
+
+            "overall_score": 0,
+
             "error": str(e),
-            "message": "Resume analysis failed"
+
+            "message": "Resume analysis failed."
+
         }

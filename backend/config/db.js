@@ -18,4 +18,3 @@ const pool = new Pool({
 });
 
 export default pool;
-console.log("👉 CONNECTED DB:", process.env.DATABASE_URL);

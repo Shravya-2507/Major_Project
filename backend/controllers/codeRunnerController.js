@@ -2,15 +2,19 @@ import { exec } from "child_process";
 import fs from "fs";
 
 export const runCode = async (req, res) => {
-  const { code } = req.body;
+  const { code, input = "" } = req.body;
 
   const filePath = "./tempCode.js";
 
   try {
-    // write code to file
+    // Write code to file
     fs.writeFileSync(filePath, code);
 
-    exec(`node ${filePath}`, (error, stdout, stderr) => {
+    // Run the node process, piping the input via stdin if provided
+    const child = exec(`node ${filePath}`, (error, stdout, stderr) => {
+      // Clean up temporary file asynchronously
+      fs.unlink(filePath, () => {});
+
       if (error) {
         return res.json({ error: error.message });
       }
@@ -21,7 +25,16 @@ export const runCode = async (req, res) => {
 
       res.json({ output: stdout });
     });
+
+    // If input is provided, write it to the process's standard input
+    if (input) {
+      child.stdin.write(input);
+      child.stdin.end();
+    }
   } catch (err) {
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
     res.status(500).json({ error: err.message });
   }
 };

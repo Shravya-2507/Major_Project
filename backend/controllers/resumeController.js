@@ -1,6 +1,8 @@
 import axios from "axios";
 import pdfParse from "pdf-parse/lib/pdf-parse.js";
 
+const PYTHON_BACKEND_URL = process.env.PYTHON_BACKEND_URL || "http://localhost:8000";
+
 // =====================
 // Extract Resume Text
 // =====================
@@ -31,43 +33,86 @@ export const extractResumeText = async (req, res) => {
 // Analyze Resume
 // =====================
 export const analyzeResume = async (req, res) => {
+
   try {
+
     const file = req.file;
 
+
     if (!file?.buffer) {
-      return res.status(400).json({ error: "No file uploaded" });
+
+      return res.status(400).json({
+        error:"No file uploaded"
+      });
+
     }
+
 
     const data = await pdfParse(file.buffer);
 
-    // ✅ CLEAN TEXT (IMPORTANT IMPROVEMENT)
+
     const extractedText = (data.text || "")
-      .replace(/\n+/g, " ")
-      .replace(/\s+/g, " ")
+      .replace(/\r/g,"")
+      .replace(/[ \t]+/g," ")
       .trim();
 
-    if (!extractedText) {
+
+
+    if(!extractedText){
+
       return res.status(400).json({
-        error: "Could not extract text from resume",
+        error:"Could not extract text from resume"
       });
+
     }
 
+
+
     const response = await axios.post(
-      "http://localhost:8000/analyze-resume",
+
+      `${PYTHON_BACKEND_URL}/analyze-resume`,
+
       {
+
         text: extractedText,
-        role: req.body.role || "General",
+
+        role:
+          req.body.role || "Software Engineer",
+
+        job_description:
+          req.body.job_description || ""
+
       },
-      { timeout: 10000 }
+
+      {
+        timeout:60000
+      }
+
     );
+
 
     return res.json(response.data);
 
-  } catch (err) {
-    console.error("Resume Error FULL:", err.response?.data || err.message);
+
+
+  } catch(err){
+
+
+    console.error(
+      "Resume Error:",
+      err.response?.data || err.message
+    );
+
 
     return res.status(500).json({
-      error: "Resume analysis failed",
+
+      error:"Resume analysis failed",
+
+      details:
+        err.response?.data || err.message
+
     });
+
   }
+
 };

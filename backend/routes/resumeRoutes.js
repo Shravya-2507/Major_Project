@@ -1,14 +1,16 @@
 import express from "express";
 import multer from "multer";
-import { analyzeResume } from "../controllers/resumeController.js";
+import { analyzeResume, extractResumeText } from "../controllers/resumeController.js";
 
 const router = express.Router();
 
-// Using memoryStorage is usually better for small AI tasks
+// Using memoryStorage for efficient handling of small PDF buffers
 const upload = multer({ storage: multer.memoryStorage() });
 
-// CHANGE: Changed "/analyze" to "/analyze-resume" to match your frontend call
-// ALSO: Ensure the upload.single name matches what you append in FormData
+// Route for standalone text extraction
+router.post("/extract-text", upload.single("file"), extractResumeText);
+
+// Route for full RAG analysis pipeline
 router.post("/analyze-resume", upload.single("file"), analyzeResume);
 
 export default router;
