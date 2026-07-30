@@ -10,18 +10,17 @@ const api = axios.create({
   },
 });
 
-// Request interceptor for debugging
 api.interceptors.request.use(
   (config) => {
-    console.log(`[API] ${config.method?.toUpperCase()} ${config.url}`);
+    const token = localStorage.getItem("token");
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
     return config;
   },
-  (error) => {
-    return Promise.reject(error);
-  }
+  (error) => Promise.reject(error)
 );
 
-// Response interceptor for error handling
 api.interceptors.response.use(
   (response) => response,
   (error) => {
@@ -32,65 +31,23 @@ api.interceptors.response.use(
 
 export default api;
 
-// ============================
-// Interview API Functions
-// ============================
 export const fetchQuestions = async (params) => {
-  try {
-    const res = await api.post("/interview/questions", params);
-    return res.data;
-  } catch (err) {
-    console.error("fetchQuestions error:", err);
-    // Return mock data if API fails
-    return [
-      { id: 1, question_text: "What is polymorphism in OOP?" },
-      { id: 2, question_text: "Explain the concept of closures in JavaScript." },
-      { id: 3, question_text: "What is the difference between REST and GraphQL?" },
-    ];
-  }
+  const res = await api.post("/interview/questions", params);
+  return res.data;
 };
 
 export const submitAnswers = async (payload) => {
-  try {
-    const res = await api.post("/interview/evaluate", payload);
-    return res.data;
-  } catch (err) {
-    console.error("submitAnswers error:", err);
-    // Return mock session for demo
-    return {
-      sessionId: `mock-${Date.now()}`,
-      overallScore: 75,
-      results: payload.answers.map((a) => ({
-        questionId: a.questionId,
-        final_score: 7.5,
-        result: "Good understanding of the concept.",
-      })),
-    };
-  }
+  const res = await api.post("/interview/evaluate", payload);
+  return res.data;
 };
 
 export const getReport = async (candidateId, sessionId) => {
-  try {
-    const res = await api.get(`/interview/analyze/${candidateId}`, {
-      params: { sessionId },
-    });
-    return res.data;
-  } catch (err) {
-    console.error("getReport error:", err);
-    // Return mock report
-    return {
-      report: {
-        total_score: 75,
-        topic_averages: { "Technical": 80, "Problem Solving": 70 },
-        classifications: { "Technical": "Intermediate", "Problem Solving": "Beginner" },
-      },
-    };
-  }
+  const res = await api.get(`/interview/analyze/${candidateId}`, {
+    params: { sessionId },
+  });
+  return res.data;
 };
 
-// ============================
-// Coding API Functions
-// ============================
 export const codingAPI = {
   getQuestions: () => api.get("/questions/coding"),
   runCode: (code, language) => api.post("/code/run", { code, language }),
@@ -98,20 +55,12 @@ export const codingAPI = {
     api.post("/code/submit", { code, language, testCases }),
 };
 
-// ============================
-// Resume API Functions
-// ============================
 export const analyzeResume = async (file) => {
   const formData = new FormData();
   formData.append("file", file);
 
-  try {
-    const res = await api.post("/resume/analyze-resume", formData, {
-      headers: { "Content-Type": "multipart/form-data" },
-    });
-    return res.data;
-  } catch (err) {
-    console.error("analyzeResume error:", err);
-    return { error: "Resume analysis failed" };
-  }
+  const res = await api.post("/resume/analyze-resume", formData, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+  return res.data;
 };
