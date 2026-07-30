@@ -18,7 +18,7 @@ export default function Practice() {
             <Code className="mb-3 text-blue-500" size={28} />
             <h3 className="text-lg font-semibold">Coding Problems</h3>
             <p className="text-gray-500 text-sm">
-              Solve coding questions (VTU + DSA)
+              Solve coding questions (DSA)
             </p>
           </div>
 

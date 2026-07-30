@@ -10,6 +10,7 @@ router.post("/", async (req, res) => {
     language, 
     language_id, 
     hiddenTestCases = [], 
+    testCases = [], 
     questionId, 
     candidateId = 1 
   } = req.body;
@@ -23,17 +24,20 @@ router.post("/", async (req, res) => {
     });
   }
 
-  if (!Array.isArray(hiddenTestCases) || hiddenTestCases.length === 0) {
+  // Combine or fallback to whichever test case array is provided
+  const finalTestCases = hiddenTestCases.length > 0 ? hiddenTestCases : testCases;
+
+  if (!Array.isArray(finalTestCases) || finalTestCases.length === 0) {
     return res.status(400).json({
       error: "No test cases found for this submission",
     });
   }
 
   try {
-    // 1. Run test cases using your judge service
-    const results = await runTestCases(code, language, hiddenTestCases);
+    // 1. Run test cases using your judge service with resolved language and test cases
+    const results = await runTestCases(code, resolvedLang, finalTestCases);
 
-    const passedTests = results.filter((r) => r.status === "AC").length;
+    const passedTests = results.filter((r) => r.status === "AC" || r.passed === true).length;
     const totalTests = results.length;
     const allPassed = totalTests > 0 && passedTests === totalTests;
     const status = allPassed ? "ACCEPTED" : "FAILED";
@@ -47,7 +51,7 @@ router.post("/", async (req, res) => {
       [
         Number(candidateId) || 1,
         Number(questionId),
-        language,
+        resolvedLang,
         status,
         passedTests,
         totalTests,

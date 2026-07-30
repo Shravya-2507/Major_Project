@@ -154,31 +154,50 @@ export const runTestCases = async (code, language_id, testCases = []) => {
   const results = [];
 
   for (const tc of testCases) {
-    const inputStr = tc.input !== undefined && tc.input !== null ? String(tc.input) : "";
-    const expectedStr = tc.output !== undefined && tc.output !== null ? String(tc.output).trim() : "";
+
+    const inputStr = tc.input !== undefined && tc.input !== null
+      ? String(tc.input)
+      : "";
+
+    const expectedStr =
+      tc.expected !== undefined && tc.expected !== null
+        ? String(tc.expected)
+        : tc.output !== undefined && tc.output !== null
+          ? String(tc.output)
+          : "";
 
     try {
-      const executionResult = await executeCode(code, language_id, inputStr);
+      const executionResult = await executeCode(
+        code,
+        language_id,
+        inputStr
+      );
 
       const actualOutput = clean(executionResult.stdout);
       const expectedOutput = clean(expectedStr);
-      const stderr = clean(executionResult.stderr || executionResult.compile_output);
 
-      const isAccepted = executionResult.status?.id === 3 && !stderr;
-      const isPassed = isAccepted && normalize(actualOutput) === normalize(expectedOutput);
+      const stderr = clean(
+        executionResult.stderr || executionResult.compile_output
+      );
+
+      const isPassed =
+        executionResult.status?.id === 3 &&
+        !stderr &&
+        normalize(actualOutput) === normalize(expectedOutput);
 
       results.push({
         input: inputStr,
         expected: expectedOutput,
-        output: actualOutput || stderr || executionResult.status?.description || "",
+        output: actualOutput || stderr,
         status: isPassed ? "AC" : "WA",
         passed: isPassed,
       });
+
     } catch (err) {
       results.push({
         input: inputStr,
         expected: expectedStr,
-        output: err.message || "Execution Error",
+        output: err.message,
         status: "RE",
         passed: false,
       });
@@ -188,11 +207,11 @@ export const runTestCases = async (code, language_id, testCases = []) => {
   return results;
 };
 
-// ==============================
-// Helper Cleaning Functions
-// ==============================
 function clean(str) {
-  return (str ?? "").toString().replace(/\r/g, "").trim();
+  return (str ?? "")
+    .toString()
+    .replace(/\r/g, "")
+    .trim();
 }
 
 function normalize(str) {

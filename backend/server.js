@@ -10,6 +10,7 @@ import resumeRoutes from "./routes/resumeRoutes.js";
 import selectionRoutes from "./routes/selectionRoutes.js";
 import authRoutes from "./routes/authRoutes.js";
 import codeRunnerRoutes from "./routes/codeRunnerRoutes.js";
+import adminRoutes from "./routes/adminRoutes.js";
 
 const app = express();
 
@@ -19,6 +20,7 @@ app.use(cors({
 }));
 app.use(express.json());
 
+
 // Routes
 app.use("/api/interview", interviewRoutes);
 app.use("/api/questions", questionRoutes);
@@ -26,6 +28,7 @@ app.use("/api/resume", resumeRoutes);
 app.use("/api", selectionRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/code", codeRunnerRoutes);
+app.use("/api/admin", adminRoutes);
 
 // 404 handler
 app.use((req, res) => {

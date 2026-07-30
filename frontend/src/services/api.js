@@ -1,6 +1,42 @@
 const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
+import axios from "axios";
 
-// Helper function for handling responses
+const api = axios.create({
+  baseURL: BASE_URL,
+  timeout: 30000,
+  headers: {
+    "Content-Type": "application/json",
+  },
+});
+
+api.interceptors.request.use(
+  (config) => {
+    const token = localStorage.getItem("token");
+
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+
+    return config;
+  },
+  (error) => Promise.reject(error)
+);
+
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    console.error(
+      "API ERROR:",
+      error.response?.data || error.message
+    );
+
+    return Promise.reject(error);
+  }
+);
+
+export default api;
+
+// Helper function for handling responses (for legacy fetch calls)
 const handleResponse = async (res) => {
   if (!res.ok) {
     const error = await res.json().catch(() => ({}));
@@ -27,9 +63,30 @@ export const loginUser = async (credentials) => {
   return await handleResponse(res);
 };
 
+export const loginAdmin = async (credentials) => {
+  const res = await fetch(`${BASE_URL}/auth/admin/login`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(credentials),
+  });
+
+  return await handleResponse(res);
+};
+
+export const signupAdmin = async (adminData) => {
+  const res = await fetch(`${BASE_URL}/auth/admin/signup`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(adminData),
+  });
+
+  return await handleResponse(res);
+};
+
 export const fetchRoles = async (companyId) => {
   try {
-    // If companyId is empty, 'general', or null, fetch the full list
     const url = (!companyId || companyId === "general") 
       ? `${BASE_URL}/roles` 
       : `${BASE_URL}/companies/${companyId}/roles`;
@@ -38,17 +95,70 @@ export const fetchRoles = async (companyId) => {
     return await handleResponse(res);
   } catch (err) {
     console.error("Fetch Roles Error:", err.message);
-    return []; // Return empty array so .map() doesn't crash
+    return [];
   }
 };
 
 export const fetchCompanies = async () => {
   try {
-    // Change this from /questions/companies to just /companies
     const res = await fetch(`${BASE_URL}/companies`);
     return await handleResponse(res);
   } catch (err) {
     console.error("Fetch Companies Error:", err.message);
+    throw err;
+  }
+};
+
+// ==============================
+// Admin Dashboard APIs (Using Axios Instance)
+// ==============================
+
+export const fetchAdminDashboard = async () => {
+  try {
+    const response = await api.get("/admin/dashboard");
+    return response.data;
+  } catch (err) {
+    console.error("Fetch Admin Dashboard Error:", err);
+    throw err;
+  }
+};
+
+export const fetchTopPerformers = async () => {
+  try {
+    const response = await api.get("/admin/top-performers");
+    return response.data;
+  } catch (err) {
+    console.error("Fetch Top Performers Error:", err);
+    throw err;
+  }
+};
+
+export const fetchActivities = async () => {
+  try {
+    const response = await api.get("/admin/activities");
+    return response.data;
+  } catch (err) {
+    console.error("Fetch Activities Error:", err);
+    throw err;
+  }
+};
+
+export const fetchBestSubject = async () => {
+  try {
+    const response = await api.get("/admin/best-subject");
+    return response.data;
+  } catch (err) {
+    console.error("Fetch Best Subject Error:", err);
+    throw err;
+  }
+};
+
+export const fetchWeakestSubject = async () => {
+  try {
+    const response = await api.get("/admin/weakest-subject");
+    return response.data;
+  } catch (err) {
+    console.error("Fetch Weakest Subject Error:", err);
     throw err;
   }
 };
@@ -73,10 +183,7 @@ export const fetchQuestions = async (data) => {
 
 export const fetchVtuQuestions = async () => {
   try {
-    // Using the native fetch API and your existing BASE_URL
     const res = await fetch(`${BASE_URL}/vtu-questions`);
-    
-    // Using your existing handleResponse helper
     return await handleResponse(res);
   } catch (err) {
     console.error("Fetch VTU Questions Error:", err.message);
@@ -164,7 +271,6 @@ export const codingAPI = {
     localStorage.removeItem(`candidate_code_drafts_${candidateId}`);
   },
 
-  // Save draft code per question so it persists on refresh
   saveCodeDraft: (questionId, code, candidateId = 1) => {
     const draftKey = `candidate_code_drafts_${candidateId}`;
     let drafts = {};
@@ -177,7 +283,6 @@ export const codingAPI = {
     localStorage.setItem(draftKey, JSON.stringify(drafts));
   },
 
-  // Retrieve draft code for a specific question on load/refresh
   getCodeDraft: (questionId, candidateId = 1) => {
     const draftKey = `candidate_code_drafts_${candidateId}`;
     try {
@@ -202,17 +307,19 @@ export const codingAPI = {
     return await handleResponse(res);
   },
 
-  submitCode: async (code, language, questionId, hiddenTestCases, candidateId = 1) => {
+  submitCode: async (payload) => {
+    const data = {
+      candidateId: payload.candidateId ?? 1,
+      questionId: payload.questionId,
+      code: payload.code,
+      language_id: payload.language_id || payload.language,
+      testCases: payload.testCases || payload.hiddenTestCases || []
+    };
+
     const response = await fetch(`${BASE_URL}/code/submit`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ 
-        candidateId,
-        questionId,
-        code, 
-        language_id: language, 
-        testCases: hiddenTestCases 
-      }),
+      body: JSON.stringify(data),
     });
     return await handleResponse(response);
   },

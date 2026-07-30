@@ -15,8 +15,11 @@ export default function CodingTest() {
     return {};
   });
 
-  // Track passed status per question ID
-  const [passedMap, setPassedMap] = useState({});
+// Track passed status for current session
+const [passedMap, setPassedMap] = useState({});
+
+// Track attempted questions only in current test session
+const [attemptedMap, setAttemptedMap] = useState({});
 
   const [language, setLanguage] = useState("javascript");
   const [customInput, setCustomInput] = useState("");
@@ -26,6 +29,7 @@ export default function CodingTest() {
   const [submitLoading, setSubmitLoading] = useState(false);
   const [questionsLoading, setQuestionsLoading] = useState(true);
   const [questionsError, setQuestionsError] = useState("");
+  const [submissionResults,setSubmissionResults] = useState({});
 
   // New states for end test confirmation modal and score summary view
   const [showConfirmModal, setShowConfirmModal] = useState(false);
@@ -40,10 +44,9 @@ export default function CodingTest() {
         setQuestionsLoading(true);
         setQuestionsError("");
 
-        // Call the exact backend endpoints you specified
         const [nextRes, subsRes] = await Promise.all([
-          codingAPI.get ? codingAPI.get("/coding/next?candidateId=1") : fetch("http://localhost:5000/api/coding/next?candidateId=1").then(r => r.json()),
-          codingAPI.get ? codingAPI.get("/coding/submissions?candidateId=1") : fetch("http://localhost:5000/api/coding/submissions?candidateId=1").then(r => r.json())
+          codingAPI.get ? codingAPI.get("/code/next?candidateId=1") : fetch("http://localhost:5000/api/code/next?candidateId=1").then(r => r.json()),
+          codingAPI.get ? codingAPI.get("/code/submissions?candidateId=1") : fetch("http://localhost:5000/api/code/submissions?candidateId=1").then(r => r.json())
         ]);
 
         const questionRows = Array.isArray(nextRes) ? nextRes : (nextRes?.data || nextRes?.rows || []);
@@ -61,8 +64,16 @@ export default function CodingTest() {
             initialPassedMap[sub.question_id] = true;
           }
         });
+        // Keep previous solved status only for display
         setPassedMap(initialPassedMap);
+
+        // Start fresh session
         setQuestions(questionRows);
+        setCodeMap({});
+        setAttemptedMap({});
+
+        // Remove old drafts
+        localStorage.removeItem("candidate_code_drafts_1");
 
       } catch (err) {
         console.error("Load Questions Error:", err);
@@ -83,9 +94,24 @@ export default function CodingTest() {
 
   const handleCodeChange = (newCode) => {
     if (!currentQuestionId) return;
-    const updated = { ...codeMap, [currentQuestionId]: newCode };
+
+    const updated = {
+      ...codeMap,
+      [currentQuestionId]: newCode
+    };
+
     setCodeMap(updated);
-    localStorage.setItem("candidate_code_drafts_1", JSON.stringify(updated));
+
+    // Track only current session attempts
+    setAttemptedMap(prev => ({
+      ...prev,
+      [currentQuestionId]: newCode.trim().length > 0
+    }));
+
+    localStorage.setItem(
+      "candidate_code_drafts_1",
+      JSON.stringify(updated)
+    );
   };
 
   const parseTestCases = (raw) => {
@@ -133,29 +159,39 @@ export default function CodingTest() {
   const handleSubmit = async () => {
     if (!currentQuestion) return;
 
+    // Client-side validation matching backend requirements
+    if (!code || !language || !currentQuestionId) {
+      alert("Error: code, language_id and questionId are required");
+      return;
+    }
+
     setSubmitLoading(true);
     setResults(null);
     try {
-      const questionId = currentQuestion.id; 
-
-      // Combine sample and hidden test cases to send to your backend /submit endpoint
+      const questionId = currentQuestionId; 
       const allTestCases = [...sampleTestCases, ...hiddenTestCases];
 
-      const res = await codingAPI.submitCode({
-        code, 
-        language_id: language, 
-        questionId, 
+      const payload = {
+        code,
+        language_id: language,
+        questionId,
         testCases: allTestCases,
         candidateId: 1
-      });
-      
+      };
+
+      const res = await codingAPI.submitCode(payload);
       setResults(res);
+      setSubmissionResults(prev => ({
+        ...prev,
+        [questionId]: res
+      }));
 
       if (res && res.success) {
         setPassedMap(prev => ({ ...prev, [questionId]: true }));
       }
     } catch (err) {
       console.error("Submit error:", err);
+      alert(err.response?.data?.error || err.message || "Submission failed");
       setResults({ success: false, results: [] });
     } finally {
       setSubmitLoading(false);
@@ -165,24 +201,47 @@ export default function CodingTest() {
   const handleConfirmEndTest = () => {
     setShowConfirmModal(false);
 
-    const attemptedQuestionIds = Object.keys(codeMap).filter((qId) => {
-      const draftText = codeMap[qId];
-      return draftText && draftText.trim().length > 0;
-    });
-
-    const attemptedCount = attemptedQuestionIds.length;
     const totalQuestions = questions.length;
 
-    const passedCount = Object.values(passedMap).filter(Boolean).length;
-    const calculatedScore = totalQuestions > 0 
-      ? Math.round((passedCount / totalQuestions) * 100) 
-      : 0;
+
+    // Count only questions attempted in this session
+    const attemptedCount = Object.values(attemptedMap)
+      .filter(Boolean)
+      .length;
+
+
+    // Count only current test solved questions
+    const totalScore = questions.reduce((sum, q) => {
+
+    const result = submissionResults[q.id];
+
+    if (!result) {
+      return sum;
+    }
+
+    const passed = result.passedTests || 0;
+    const total = result.totalTests || 0;
+
+    if(total === 0){
+      return sum;
+    }
+
+    return sum + ((passed / total) * 100);
+
+  },0);
+
+
+  const calculatedScore = totalQuestions > 0
+    ? Math.round(totalScore / totalQuestions)
+    : 0;
+
 
     setTestSummary({
       attemptedCount,
       totalQuestions,
       score: `${calculatedScore} / 100`
     });
+
 
     localStorage.removeItem("candidate_code_drafts_1");
   };
@@ -204,7 +263,22 @@ export default function CodingTest() {
   }
 
   if (questionsError) {
-    return <div className="p-6 text-red-600 text-center font-semibold">{questionsError}</div>;
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-gray-50 p-6">
+        <div className="bg-white shadow-lg rounded-xl p-8 text-center max-w-md border">
+          <div className="text-5xl mb-4">🎉</div>
+          <h2 className="text-2xl font-bold text-gray-800 mb-3">Congratulations!</h2>
+          <p className="text-gray-600 mb-6">You have solved all available coding questions.</p>
+          <p className="text-blue-600 font-semibold mb-6">New questions have been added. Refresh to continue practicing.</p>
+          <button
+            onClick={() => window.location.reload()}
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg transition"
+          >
+            Refresh Questions
+          </button>
+        </div>
+      </div>
+    );
   }
 
   if (!currentQuestion) {
@@ -292,7 +366,7 @@ export default function CodingTest() {
             {sampleTestCases.map((tc, idx) => (
               <div key={idx} className="border p-3 mt-2 rounded bg-gray-50 font-mono text-sm">
                 <p className="text-blue-600">Input: {tc.input}</p>
-                <p className="text-green-600">Expected: {tc.output}</p>
+                <p className="text-green-600">Expected: {tc.expected}</p>
               </div>
             ))}
           </div>
@@ -331,7 +405,6 @@ export default function CodingTest() {
               >
                 <option value="javascript">JavaScript</option>
                 <option value="python">Python</option>
-                <option value="java">Java</option>
               </select>
             </div>
 

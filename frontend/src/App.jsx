@@ -3,6 +3,7 @@ import { Routes, Route } from "react-router-dom";
 // Layouts
 import MainLayout from "./layouts/MainLayout";
 import DashboardLayout from "./layouts/DashboardLayout";
+import AdminLayout from "./admin/AdminLayout";
 
 // Pages
 import Home from "./pages/Home";
@@ -16,6 +17,13 @@ import CodingTest from "./pages/CodingTest";
 import MockInterview from "./pages/MockInterview";
 import Interview from "./pages/Interview";
 import Feedback from "./pages/Feedback";
+
+// Admin
+import AdminDashboard from "./admin/AdminDashboard";
+import Leaderboard from "./admin/Leaderboard";
+import MonthlyRanking from "./admin/MonthlyRanking";
+import CandidateProfile from "./admin/CandidateProfile";
+
 
 function App() {
   return (
@@ -38,6 +46,14 @@ function App() {
       <Route path="/interview" element={<DashboardLayout><Interview /></DashboardLayout>} />
       <Route path="/feedback" element={<DashboardLayout><Feedback /></DashboardLayout>} />
       <Route path="/test/vtu" element={<Test />} />
+
+      {/* Admin */}
+      <Route path="/admin" element={<AdminLayout />}>
+        <Route index element={<AdminDashboard />} />
+        <Route path="leaderboard" element={<Leaderboard />} />
+        <Route path="monthly-ranking" element={<MonthlyRanking />} />
+        <Route path="candidate/:id" element={<CandidateProfile />} />
+      </Route>
 
     </Routes>
   );

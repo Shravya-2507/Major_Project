@@ -2,7 +2,7 @@ import pool from "../config/db.js";
 import { executeCode } from "../services/judgeService.js";
 
 // ==============================
-// Helper: Parse Filters (GET + POST support)
+// Helper: Parse Filters
 // ==============================
 const parseFilters = (req) => {
   const source = req.method === "POST" ? req.body : req.query;
@@ -18,87 +18,119 @@ const parseFilters = (req) => {
       : String(source.syllabus_ids).split(",").map(Number)
     : null;
 
-  // STRICT REQUIREMENT: Always limit to 3 questions at a time
+  // Always provide 3 questions
   const limit = 3;
 
-  return { candidateId, roleId, companyId, difficulty, syllabusIds, limit };
+  return {
+    candidateId,
+    roleId,
+    companyId,
+    difficulty,
+    syllabusIds,
+    limit,
+  };
 };
 
 // ==============================
-// 1. Get Non-Repeating Coding Questions (Limit 3)
+// Get Non-Repeating Questions
 // ==============================
 export const getCodingQuestions = async (req, res) => {
   try {
-    const { candidateId, roleId, companyId, difficulty, syllabusIds, limit } = parseFilters(req);
+    const {
+      candidateId,
+      roleId,
+      companyId,
+      difficulty,
+      syllabusIds,
+      limit,
+    } = parseFilters(req);
 
-    // 1. Find all question IDs this candidate has already solved successfully
-    const solvedRes = await pool.query(
-      `SELECT DISTINCT question_id 
-       FROM coding_submissions 
-       WHERE candidate_id = $1 AND (status = 'ACCEPTED' OR status = 'AC' OR score = 100)`,
+    // Fetch already solved questions by the candidate
+    const solvedResult = await pool.query(
+      `
+      SELECT DISTINCT question_id
+      FROM coding_submissions
+      WHERE candidate_id = $1
+      AND status = 'ACCEPTED'
+      `,
       [candidateId]
     );
 
-    const solvedIds = solvedRes.rows.map((row) => row.question_id);
+    const solvedIds = solvedResult.rows.map((row) => row.question_id);
 
-    // 2. Build dynamic query for CodingQuestion table
     let query = `
-      SELECT id, title, description, difficulty, constraints, tags, sample_input, sample_output, sample_test_cases
+      SELECT
+        id,
+        title,
+        description,
+        difficulty,
+        constraints,
+        tags,
+        "sampleInput",
+        "sampleOutput",
+        "sampleTestCases"
       FROM "CodingQuestion"
       WHERE 1=1
     `;
 
-    const values = [];
-    let counter = 1;
+    let values = [];
+    let index = 1;
 
-    // Exclude already solved questions so they never repeat
+    // Exclude already solved questions
     if (solvedIds.length > 0) {
-      query += ` AND id != ANY($${counter++}::int[])`;
+      query += ` AND id != ALL($${index}::int[])`;
       values.push(solvedIds);
+      index++;
     }
 
     if (roleId) {
-      query += ` AND role_id = $${counter++}`;
+      query += ` AND role_id = $${index}`;
       values.push(roleId);
+      index++;
     }
 
     if (companyId) {
-      query += ` AND (company_id = $${counter++} OR company_id IS NULL)`;
+      query += ` AND (company_id = $${index} OR company_id IS NULL)`;
       values.push(companyId);
+      index++;
     }
 
     if (difficulty) {
-      query += ` AND difficulty = $${counter++}`;
+      query += ` AND difficulty = $${index}`;
       values.push(difficulty);
+      index++;
     }
 
     if (syllabusIds?.length) {
-      query += ` AND syllabus_id = ANY($${counter++}::int[])`;
+      query += ` AND syllabus_id = ANY($${index}::int[])`;
       values.push(syllabusIds);
+      index++;
     }
 
-    // Randomize and strictly limit results to 3
-    query += ` ORDER BY RANDOM() LIMIT $${counter}`;
+    query += ` ORDER BY RANDOM() LIMIT $${index}`;
     values.push(limit);
 
     const result = await pool.query(query, values);
 
     if (result.rows.length === 0) {
-      return res.status(404).json({
-        message: "Congratulations! You have solved all available questions matching these filters.",
+      return res.json({
+        completed: true,
+        message: "Congratulations! You have solved all available coding questions.",
+        newQuestionsAdded: false,
       });
     }
 
     res.json(result.rows);
-
   } catch (err) {
-    console.error("Error fetching coding questions:", err);
-    res.status(500).json({ error: "Internal Server Error" });
+    console.error("Get Coding Questions Error:", err);
+    res.status(500).json({
+      error: "Failed to load coding questions",
+    });
   }
 };
 
 // ==============================
-// 2. Evaluate / Run Coding Submissions
+// Submit Coding Answer
 // ==============================
 export const evaluateCodingAnswers = async (req, res) => {
   try {
@@ -106,38 +138,46 @@ export const evaluateCodingAnswers = async (req, res) => {
 
     if (!candidateId || !submissions?.length) {
       return res.status(400).json({
-        error: "candidateId and submissions are required",
+        error: "candidateId and submissions required",
       });
     }
 
-    const results = [];
+    let finalResults = [];
 
     for (const sub of submissions) {
-      const dbRes = await pool.query(
-        `SELECT sample_test_cases, hidden_test_cases 
-         FROM "CodingQuestion" WHERE id = $1`,
+      // Fetch test cases from database (Hidden cases never leave backend)
+      const questionResult = await pool.query(
+        `
+        SELECT
+          "sampleTestCases",
+          "hiddenTestCases"
+        FROM "CodingQuestion"
+        WHERE id = $1
+        `,
         [sub.questionId]
       );
 
-      const question = dbRes.rows[0];
+      const question = questionResult.rows[0];
       if (!question) continue;
 
       const testCases = [
-        ...(question.sample_test_cases || []),
-        ...(question.hidden_test_cases || [])
+        ...(question.sampleTestCases || []),
+        ...(question.hiddenTestCases || []),
       ];
 
-      if (testCases.length === 0) continue;
-
-      let testResults = [];
       let passedCount = 0;
+      let testResults = [];
 
-      for (let tc of testCases) {
-        const response = await executeCode(sub.code, sub.language, tc.input);
+      for (const tc of testCases) {
+        const execution = await executeCode(
+          sub.code,
+          sub.language,
+          tc.input
+        );
 
-        const output = response.stdout?.trim() || "";
-        const expectedStr = String(tc.output).trim();
-        const passed = output === expectedStr;
+        const output = execution.stdout?.trim() || "";
+        const expected = String(tc.output).trim();
+        const passed = output === expected;
 
         if (passed) passedCount++;
 
@@ -145,7 +185,7 @@ export const evaluateCodingAnswers = async (req, res) => {
           input: tc.input,
           expected: tc.output,
           output,
-          error: response.stderr || null,
+          error: execution.stderr || null,
           passed,
         });
       }
@@ -154,10 +194,22 @@ export const evaluateCodingAnswers = async (req, res) => {
       const score = Number(((passedCount / totalTests) * 100).toFixed(2));
       const status = passedCount === totalTests ? "ACCEPTED" : "FAILED";
 
+      // Save submission to database
       await pool.query(
-        `INSERT INTO coding_submissions 
-        (candidate_id, question_id, language, status, passed_tests, total_tests, score, code, results)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        `
+        INSERT INTO coding_submissions (
+          candidate_id,
+          question_id,
+          language,
+          status,
+          passed_tests,
+          total_tests,
+          score,
+          code,
+          results
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        `,
         [
           candidateId,
           sub.questionId,
@@ -171,7 +223,7 @@ export const evaluateCodingAnswers = async (req, res) => {
         ]
       );
 
-      results.push({
+      finalResults.push({
         questionId: sub.questionId,
         status,
         passedCount,
@@ -181,10 +233,14 @@ export const evaluateCodingAnswers = async (req, res) => {
       });
     }
 
-    res.json(results);
-
+    res.json({
+      success: true,
+      results: finalResults,
+    });
   } catch (err) {
-    console.error("Error evaluating coding answers:", err);
-    res.status(500).json({ error: "Code evaluation failed" });
+    console.error("Evaluation Error:", err);
+    res.status(500).json({
+      error: "Code evaluation failed",
+    });
   }
 };

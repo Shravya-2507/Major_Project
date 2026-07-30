@@ -10,10 +10,6 @@ const router = express.Router();
 router.get("/next", async (req, res) => {
   try {
     const candidateId = Number(req.query.candidateId || 1);
-    const difficulty = req.query.difficulty ? String(req.query.difficulty) : null;
-    
-    // Force the limit strictly to 3 questions at a time
-    const limit = 3;
 
     // 1. Find all question IDs this candidate has already solved successfully
     const solvedRes = await pool.query(
@@ -25,52 +21,67 @@ router.get("/next", async (req, res) => {
 
     const solvedIds = solvedRes.rows.map((row) => row.question_id);
 
-    // 2. Build dynamic query for CodingQuestion table using exact column casing with double quotes
-    let query = `
-      SELECT 
-        id, 
-        title, 
-        description, 
-        difficulty, 
-        constraints, 
-        tags, 
-        "sampleInput", 
-        "sampleOutput", 
-        "sampleTestCases", 
-        "hiddenTestCases"
-      FROM "CodingQuestion"
-      WHERE 1=1
-    `;
+    // 2. Fetch one Easy, one Medium, and one Hard question dynamically
+    const difficulties = ['Easy', 'Medium', 'Hard'];
+    let selectedQuestions = [];
 
-    const values = [];
-    let counter = 1;
+    for (const diff of difficulties) {
+      let query = `
+        SELECT id, title, description, difficulty, constraints, tags, 
+               "sampleInput", "sampleOutput", "sampleTestCases", "hiddenTestCases"
+        FROM "CodingQuestion"
+        WHERE difficulty = $1
+      `;
+      const values = [diff];
 
-    // Exclude already solved questions so they never repeat
-    if (solvedIds.length > 0) {
-      query += ` AND id != ANY($${counter++}::int[])`;
-      values.push(solvedIds);
+      if (solvedIds.length > 0) {
+        query += ` AND id != ANY($2::int[])`;
+        values.push(solvedIds);
+      }
+
+      query += ` ORDER BY RANDOM() LIMIT 1`;
+
+      const resTier = await pool.query(query, values);
+      if (resTier.rows.length > 0) {
+        selectedQuestions.push(resTier.rows[0]);
+      }
     }
 
-    // Difficulty filter (Easy, Medium, Hard)
-    if (difficulty) {
-      query += ` AND difficulty = $${counter++}`;
-      values.push(difficulty);
+    // Fallback if any tier is completely exhausted: grab any remaining unsolved questions up to 3
+    if (selectedQuestions.length < 3) {
+      let fallbackQuery = `
+        SELECT id, title, description, difficulty, constraints, tags, 
+               "sampleInput", "sampleOutput", "sampleTestCases", "hiddenTestCases"
+        FROM "CodingQuestion"
+        WHERE 1=1
+      `;
+      const fallbackValues = [];
+      let counter = 1;
+
+      if (solvedIds.length > 0) {
+        fallbackQuery += ` AND id != ANY($${counter++}::int[])`;
+        fallbackValues.push(solvedIds);
+      }
+
+      if (selectedQuestions.length > 0) {
+        fallbackQuery += ` AND id != ANY($${counter++}::int[])`;
+        fallbackValues.push(selectedQuestions.map(q => q.id));
+      }
+
+      fallbackQuery += ` ORDER BY RANDOM() LIMIT $${counter}`;
+      fallbackValues.push(3 - selectedQuestions.length);
+
+      const fallbackRes = await pool.query(fallbackQuery, fallbackValues);
+      selectedQuestions = [...selectedQuestions, ...fallbackRes.rows];
     }
 
-    // Randomize and strictly limit results to 3
-    query += ` ORDER BY RANDOM() LIMIT $${counter}`;
-    values.push(limit);
-
-    const result = await pool.query(query, values);
-
-    if (result.rows.length === 0) {
+    if (selectedQuestions.length === 0) {
       return res.status(404).json({
         message: "Congratulations! You have solved all available coding questions.",
       });
     }
 
-    // Always return an array of up to 3 questions
-    res.json(result.rows);
+    res.json(selectedQuestions);
 
   } catch (err) {
     console.error("Error fetching next coding questions:", err);
