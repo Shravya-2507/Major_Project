@@ -2,7 +2,7 @@ import pool from "../config/db.js";
 import { evaluateAnswer } from "../services/evaluationService.js";
 import axios from "axios";
 
-const AI_API = process.env.AI_API_URL || "http://localhost:8000";
+const AI_API = process.env.AI_API_URL || "http://127.0.0.1:8000";
 
 // ==============================
 // 1. Evaluate Answers (FINAL FIX)
@@ -84,12 +84,12 @@ export const evaluateAnswers = async (req, res) => {
       const feedback = aiData.result ?? aiData.feedback ?? "";
 
       const semantic = Number(aiData.semantic_score) || 0;
-      const smith = Number(aiData.smith_score) || 0;
+      const keyword = Number(aiData.keyword_match_score) || 0;
 
       // ✅ INSERT ANSWER
       const inserted = await client.query(
         `INSERT INTO answers 
-        (candidate_id, question_id, answer_text, ai_score, ai_feedback, session_id, semantic_score, smith_score, role_id, company_id) 
+        (candidate_id, question_id, answer_text, ai_score, ai_feedback, session_id, semantic_score,keyword_match_score, role_id, company_id) 
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
         RETURNING *`,
         [
@@ -100,7 +100,7 @@ export const evaluateAnswers = async (req, res) => {
           feedback,
           sessionId,
           semantic,
-          smith,
+          keyword,
           roleId || null,
           companyId || null,
         ]
@@ -195,15 +195,38 @@ export const generateFinalReport = async (req, res) => {
 
     // Fetch answers
     const dbData = await pool.query(
-      `SELECT q.question_text, q.expected_answer, a.answer_text, 
-              COALESCE(sub.subject_name, 'General Technical') as topic
-       FROM answers a
-       JOIN questions q ON a.question_id = q.id
-       LEFT JOIN vtu_syllabus s ON q.syllabus_id = s.id
-       LEFT JOIN vtu_subjects sub ON s.subject_id = sub.id
-       WHERE a.candidate_id = $1 AND a.session_id = $2`,
-      [candidateId, targetSession]
-    );
+  `SELECT 
+      q.question_text,
+      q.expected_answer,
+      a.answer_text,
+      COALESCE(
+          sub.subject_name,
+          r.role_name,
+          c.company_name,
+          'General Technical'
+      ) AS topic
+
+   FROM answers a
+
+   JOIN questions q 
+      ON a.question_id = q.id
+
+   LEFT JOIN vtu_syllabus s 
+      ON q.syllabus_id = s.id
+
+   LEFT JOIN vtu_subjects sub 
+      ON s.subject_id = sub.id
+
+   LEFT JOIN roles r
+      ON q.role_id = r.id
+
+   LEFT JOIN companies c
+      ON q.company_id = c.id
+
+   WHERE a.candidate_id = $1 
+     AND a.session_id = $2`,
+  [candidateId, targetSession]
+);
 
     if (dbData.rows.length === 0) {
       return res.status(404).json({
@@ -213,25 +236,36 @@ export const generateFinalReport = async (req, res) => {
 
     // AI analysis
     const analysisResponse = await axios.post(
-      `${AI_API}/analyze-topics`,
-      {
-        questions: dbData.rows.map((r) => ({
-          question: r.question_text,
-          answer: r.expected_answer,
-          topic: r.topic,
-        })),
-        user_answers: dbData.rows.map((r) => r.answer_text),
-      }
-    );
+    `${AI_API}/analyze-topics`,
+    {
+      questions: dbData.rows.map((r) => ({
+        question: r.question_text,
+        topic: r.topic,
+      })),
+
+      user_answers: dbData.rows.map(
+        (r) => r.answer_text
+      ),
+    },
+    {
+      timeout: 60000,
+    }
+  );
 
     const report = analysisResponse.data;
 
-    const avgValues = Object.values(report.topic_average || {});
-
-    let totalScore =
-      avgValues.length > 0
-        ? avgValues.reduce((a, b) => a + b, 0) / avgValues.length
-        : 0;
+    const avgValues = Object.values(
+    report.topic_performance || 
+    report.topic_average ||
+    {}
+    );
+   let totalScore =
+  avgValues.length > 0
+    ? avgValues.reduce(
+        (a, b) => a + Number(b || 0),
+        0
+      ) / avgValues.length
+    : 0;
 
     totalScore = Number(totalScore.toFixed(2)) || 0;
 
@@ -249,9 +283,25 @@ export const generateFinalReport = async (req, res) => {
       [
         candidateId,
         targetSession,
-        JSON.stringify(report.topic_average || {}),
-        JSON.stringify(report.classification || {}),
-        JSON.stringify(report.pagerank || {}),
+
+        JSON.stringify(
+          report.topic_performance ||
+          report.topic_average ||
+         {}
+        ),
+
+        JSON.stringify(
+          report.classification || 
+          report.classifications ||
+          {}
+        ),
+
+        JSON.stringify(
+          report.ranked_topics || 
+          report.pagerank ||
+          {}
+        ),
+
         totalScore,
       ]
     );
@@ -262,7 +312,8 @@ export const generateFinalReport = async (req, res) => {
     });
 
   } catch (err) {
-    console.error("❌ Analysis Error FULL:", err);
-    res.status(500).json({ error: "Analysis failed" });
+    console.error("❌ Analysis Error FULL:", err.response?.data || err.message
+    );
+    res.status(500).json({ error: "Analysis failed", details: err.response?.data || err.message });
   }
 };

@@ -14,7 +14,7 @@ from resume.experience_analyzer import analyze_experience
 from resume.project_analyzer import analyze_projects
 from resume.achievement_analyzer import analyze_achievements
 from resume.feedback_generator import generate_feedback
-
+from interview.question_generator import generate_question
 # =============================
 # AI MODULE IMPORTS
 # =============================
@@ -56,8 +56,8 @@ class AnswerRequest(BaseModel):
 
 class Question(BaseModel):
     question: str
-    answer: str
     topic: str
+    answer: str = ""
 
 
 class TopicAnalysisRequest(BaseModel):
@@ -70,6 +70,23 @@ class ResumeRequest(BaseModel):
     role: str = "General"
     job_description: Optional[str] = None
 
+class QuestionGenerationRequest(BaseModel):
+    role: str
+    company: str = "General"
+    topic: str
+    question_type: str = "Technical"
+    category: str = "Conceptual"
+
+    history: List[dict] = []
+
+class AdaptiveQuestionRequest(BaseModel):
+    role: str
+    company: str = "General"
+    question_type: str = "Technical"
+    
+
+    questions: List[Question]
+    user_answers: List[str]
 # =============================
 # ROOT
 # =============================
@@ -102,6 +119,10 @@ def analyze(req: TopicAnalysisRequest):
         if len(req.questions) != len(req.user_answers):
             return {"error": "Mismatch in questions and answers"}
 
+        if not req.questions:
+            return {
+                "error": "No questions provided"
+            }
         questions = [q.model_dump() for q in req.questions]
 
         topic_scores = analyze_topics(questions, req.user_answers)
@@ -111,12 +132,15 @@ def analyze(req: TopicAnalysisRequest):
         pagerank_scores = pagerank_topics(topic_avg)
 
         return {
-            "topic_scores": topic_scores,
-            "topic_average": topic_avg,
-            "ranking": ranked,
-            "classification": classified,
-            "pagerank": pagerank_scores
-        }
+        "topic_scores": topic_scores,
+        "topic_average": topic_avg,
+        "topic_performance": topic_avg,
+        "ranking": ranked,
+        "ranked_topics": ranked,
+        "classification": classified,
+        "classifications": classified,
+        "pagerank": pagerank_scores
+    }
 
     except Exception as e:
         logging.error(traceback.format_exc())
@@ -248,5 +272,121 @@ async def analyze_resume(req: ResumeRequest):
             "error": str(e),
 
             "message": "Resume analysis failed."
+
+        }
+@app.post("/generate-question")
+def generate_interview_question(req: QuestionGenerationRequest):
+
+    try:
+        question = generate_question(
+
+            role=req.role,
+
+            company=req.company or "General",
+
+            topic=req.topic,
+
+            history=req.history,
+
+            question_type=req.question_type,
+
+            category=req.category
+        )
+
+        return {
+
+            "question": question,
+
+            "role": req.role,
+
+            "company": req.company or "General",
+
+            "topic": req.topic,
+
+            "question_type": req.question_type,
+
+            "category": req.category
+
+        }
+
+    except Exception as e:
+
+        logging.error(traceback.format_exc())
+
+        return {
+
+            "error": str(e)
+
+        }
+@app.post("/next-question")
+def next_question(req: AdaptiveQuestionRequest):
+
+    try:
+
+        questions = [q.model_dump() for q in req.questions]
+
+        # Analyze candidate performance
+        topic_scores = analyze_topics(
+            questions,
+            req.user_answers
+        )
+
+        topic_avg = calculate_topic_performance(topic_scores)
+
+        if not topic_avg:
+            return {
+                "error": "Unable to analyze topics"
+            }
+        pagerank = pagerank_topics(topic_avg)
+        # Weakest topic
+        weakest_topic = min(
+            topic_avg,
+            key=topic_avg.get
+        )
+
+        # Difficulty adaptation
+        score = topic_avg[weakest_topic]
+        history=[
+                    {
+                        "score": score
+                    }
+        ]
+        question = generate_question(
+
+            role=req.role,
+
+            company=req.company or "General",
+
+            topic=weakest_topic,
+
+            history=history,
+
+            question_type=req.question_type
+
+        )
+
+        return {
+
+            "next_question": question,
+
+            "topic": weakest_topic,
+
+            "difficulty": question["difficulty"],
+
+            "topic_scores": topic_avg,
+
+            "pagerank": pagerank
+
+        }
+
+    except Exception as e:
+
+        logging.error(traceback.format_exc())
+
+        return {
+
+            "error": str(e),
+
+            "message": "Adaptive question generation failed"
 
         }

@@ -9,7 +9,7 @@ const AI_API = process.env.AI_API_URL || "http://localhost:8000";
 
 const api = axios.create({
   baseURL: AI_API,
-  timeout: 10000,
+  timeout: 120000,
   headers: {
     "Content-Type": "application/json",
   },
@@ -32,7 +32,8 @@ export const evaluateAnswer = async (
         score: 0,
         feedback: "Invalid input",
         semantic_score: 0,
-        smith_score: 0,
+        keyword_match_score: 0,
+        evaluation_method: {},
       };
     }
 
@@ -44,18 +45,27 @@ export const evaluateAnswer = async (
     });
 
     const data = response.data;
+    console.log("========== AI RESPONSE ==========");
+console.log(data);
+console.log("================================");
+
     const finalScore = data.final_score || 0;
     const resultText = data.result || "No feedback";
 
     return {
       final_score: finalScore,
       result: resultText,
-      semantic_score: data.semantic_score || 0,
-      smith_score: data.smith_score || 0,
       score: Math.round(finalScore * 10),
       feedback: resultText,
+
+      semantic_score: data.semantic_score || 0,
+      keyword_match_score: data.keyword_match_score || 0,
+
+      evaluation_method: data.evaluation_method || {},
     };
+
   } catch (error) {
+
     console.error("AI Evaluation Error:", {
       message: error.message,
       status: error.response?.status,
@@ -68,11 +78,67 @@ export const evaluateAnswer = async (
       score: 0,
       feedback: "AI evaluation failed",
       semantic_score: 0,
-      smith_score: 0,
+      keyword_match_score: 0,
+      evaluation_method: {},
     };
   }
 };
 
+// ==============================
+// 2. Generate Next Adaptive Question
+// ==============================
+export const getNextQuestion = async (
+  role,
+  company,
+  questions,
+  user_answers,
+  question_type = "Technical"
+) => {
+
+  try {
+
+    const response = await api.post("/next-question", {
+      role,
+      company,
+      question_type,
+      questions,
+      user_answers,
+    });
+
+    return response.data;
+
+  } catch (error) {
+
+    console.error(
+      "Next Question Error:",
+      error.message
+    );
+
+    throw error;
+  }
+};
+console.log("===== NEW generateQuestions Controller Loaded =====");
+export const generateQuestion = async (data) => {
+
+  try {
+
+    const response = await api.post(
+      "/generate-question",
+      data
+    );
+
+    return response.data;
+
+  } catch (error) {
+
+    console.error(
+      "Generate Question Error:",
+      error.message
+    );
+
+    throw error;
+  }
+};
 // ==============================
 // 2. Execute Code Locally via Child Process
 // ==============================

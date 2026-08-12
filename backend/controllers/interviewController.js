@@ -1,60 +1,147 @@
-import { pool } from "../db.js";
-import { evaluateAnswer } from "../services/evaluationService.js";
+import pool from "../config/db.js";
+
+import {
+  evaluateAnswer,
+  generateQuestion,
+} from "../services/evaluationService.js";
+
 import { updateMonthlyRanking } from "../services/rankingService.js";
 import { updateSubjectPerformance } from "../services/performanceService.js";
 
 // ==============================
-// Generate Questions
+// Generate AI Interview Question
 // ==============================
+
 export const generateQuestions = async (req, res) => {
   try {
-    const { roleId, companyId, syllabusIds, limit = 5 } = req.body;
+    const {
+      role,
+      company = "General",
+      topic,
+      question_type = "Technical",
+      category = "Conceptual",
+      history = [],
+      candidateId = null,
+    } = req.body;
 
-    let query = `
-      SELECT id,
-             question_text,
-             syllabus_id,
-             role_id,
-             company_id
-      FROM questions
-      WHERE 1=1
-    `;
-
-    const values = [];
-    let counter = 1;
-
-    if (roleId) {
-      query += ` AND role_id = $${counter++}`;
-      values.push(roleId);
-    }
-
-    if (companyId) {
-      query += ` AND (company_id = $${counter++} OR company_id IS NULL)`;
-      values.push(companyId);
-    }
-
-    if (syllabusIds?.length) {
-      query += ` AND syllabus_id = ANY($${counter++}::int[])`;
-      values.push(syllabusIds);
-    }
-
-    query += ` ORDER BY RANDOM() LIMIT $${counter}`;
-    values.push(limit);
-
-    const result = await pool.query(query, values);
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({
-        message: "No questions found",
+    if (!role || !topic) {
+      return res.status(400).json({
+        error: "role and topic are required",
       });
     }
 
-    return res.json(result.rows);
-  } catch (err) {
-    console.error("Question fetch error", err);
+    // Generate personalized question using AI
+    const aiResponse = await generateQuestion({
+      role,
+      company,
+      topic,
+      question_type,
+      category,
+      history,
+    });
+
+    const generated = aiResponse.question;
+
+    console.log("========== AI RESPONSE ==========");
+    console.dir(aiResponse, { depth: null });
+    console.log("================================");
+
+    // ==============================
+    // Fetch Role ID
+    // ==============================
+
+    let roleId = null;
+
+    const roleResult = await pool.query(
+      `SELECT id
+       FROM roles
+       WHERE LOWER(role_name) = LOWER($1)
+       LIMIT 1`,
+      [role]
+    );
+
+    if (roleResult.rows.length > 0) {
+      roleId = roleResult.rows[0].id;
+    }
+
+    // ==============================
+    // Fetch Company ID
+    // ==============================
+
+    let companyId = null;
+
+    if (company && company !== "General") {
+      const companyResult = await pool.query(
+        `SELECT id
+         FROM companies
+         WHERE LOWER(company_name) = LOWER($1)
+         LIMIT 1`,
+        [company]
+      );
+
+      if (companyResult.rows.length > 0) {
+        companyId = companyResult.rows[0].id;
+      }
+    }
+
+    // ==============================
+    // Save AI Generated Question
+    // ==============================
+
+    const insertResult = await pool.query(
+      `
+      INSERT INTO questions
+      (
+        question_text,
+        role_id,
+        company_id,
+        difficulty_level,
+        question_type,
+        expected_answer,
+        generated_by,
+        category,
+        created_for_candidate,
+        ai_difficulty
+      )
+      VALUES
+      ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+      RETURNING id
+      `,
+      [
+        generated.question,
+        roleId,
+        companyId,
+        generated.difficulty?.toLowerCase() || "medium",
+        question_type.toLowerCase(),
+        null,
+        "AI",
+        category,
+        candidateId,
+        generated.difficulty || "Medium",
+      ]
+    );
+
+    const questionId = insertResult.rows[0].id;
+
+    return res.status(200).json({
+      success: true,
+      question_id: questionId,
+      question: generated.question,
+      difficulty: generated.difficulty,
+      topic: generated.topic,
+      company: generated.company,
+      role: generated.role,
+      category,
+      question_type,
+    });
+  } catch (error) {
+    console.error("AI Question Generation Error:", error);
 
     return res.status(500).json({
-      error: "Failed to load questions",
+      success: false,
+      error: "Question generation failed",
+      details: error.message,
+      stack: error.stack,
     });
   }
 };
@@ -62,9 +149,12 @@ export const generateQuestions = async (req, res) => {
 // ==============================
 // Evaluate Interview
 // ==============================
+
 export const evaluateInterview = async (req, res) => {
   try {
-    const candidateId = Number(req.body.candidateId || req.user?.id);
+    const candidateId = Number(
+      req.body.candidateId || req.user?.id
+    );
 
     const {
       answers = [],
@@ -84,20 +174,30 @@ export const evaluateInterview = async (req, res) => {
 
     const questionMap = {};
 
+    // ==============================
+    // Load Question Information
+    // ==============================
+
     for (const ans of answers) {
       const questionResult = await pool.query(
-        `SELECT id,
-                expected_answer,
-                syllabus_id
+        `SELECT
+            id,
+            expected_answer,
+            syllabus_id
          FROM questions
          WHERE id = $1`,
         [ans.questionId]
       );
 
       if (questionResult.rows.length > 0) {
-        questionMap[ans.questionId] = questionResult.rows[0];
+        questionMap[ans.questionId] =
+          questionResult.rows[0];
       }
     }
+
+    // ==============================
+    // Get Role Name
+    // ==============================
 
     const roleName = roleId
       ? (
@@ -107,6 +207,10 @@ export const evaluateInterview = async (req, res) => {
           )
         ).rows[0]?.role_name || "General"
       : "General";
+
+    // ==============================
+    // Get Company Name
+    // ==============================
 
     const companyName = companyId
       ? (
@@ -121,6 +225,10 @@ export const evaluateInterview = async (req, res) => {
     let totalScore = 0;
     let correctAnswers = 0;
 
+    // ==============================
+    // Evaluate Each Answer
+    // ==============================
+
     for (const ans of answers) {
       const expected =
         questionMap[ans.questionId]?.expected_answer || "";
@@ -133,7 +241,11 @@ export const evaluateInterview = async (req, res) => {
       );
 
       const finalScore =
-        Number(aiData.final_score ?? aiData.score ?? 0) || 0;
+        Number(
+          aiData.final_score ??
+          aiData.score ??
+          0
+        ) || 0;
 
       const feedback =
         aiData.result ??
@@ -187,8 +299,18 @@ export const evaluateInterview = async (req, res) => {
       );
     }
 
+    // ==============================
+    // Calculate Overall Score
+    // ==============================
+
     const overallScore =
-      Number((totalScore / answers.length).toFixed(2)) || 0;
+      Number(
+        (totalScore / answers.length).toFixed(2)
+      ) || 0;
+
+    // ==============================
+    // Calculate Duration
+    // ==============================
 
     const startedDate = startedAt
       ? new Date(startedAt)
@@ -198,8 +320,14 @@ export const evaluateInterview = async (req, res) => {
 
     const durationMinutes = Math.max(
       0,
-      Math.round((completedAt - startedDate) / 60000)
+      Math.round(
+        (completedAt - startedDate) / 60000
+      )
     );
+
+    // ==============================
+    // Save Test Attempt
+    // ==============================
 
     const attemptResult = await pool.query(
       `INSERT INTO test_attempts
@@ -232,6 +360,10 @@ export const evaluateInterview = async (req, res) => {
       ]
     );
 
+    // ==============================
+    // Update Monthly Ranking
+    // ==============================
+
     await updateMonthlyRanking(
       candidateId,
       overallScore
@@ -242,21 +374,28 @@ export const evaluateInterview = async (req, res) => {
       sessionId,
       overallScore,
       results,
-      attemptId: attemptResult.rows[0]?.attempt_id,
+      attemptId:
+        attemptResult.rows[0]?.attempt_id,
     });
   } catch (err) {
-    console.error("Interview evaluation error", err);
+    console.error(
+      "Interview evaluation error",
+      err
+    );
 
     return res.status(500).json({
       error: "Evaluation failed",
-      details: err.message || "Unknown error",
+      details:
+        err.message || "Unknown error",
       stack: err.stack || null,
     });
   }
 };
+
 // ==============================
 // Generate Interview Report
 // ==============================
+
 export const generateReport = async (req, res) => {
   try {
     const { candidateId } = req.params;
@@ -264,7 +403,6 @@ export const generateReport = async (req, res) => {
 
     let targetSession = sessionId;
 
-    // If no sessionId is provided, use the latest session
     if (!targetSession) {
       const latest = await pool.query(
         `SELECT session_id
@@ -275,7 +413,8 @@ export const generateReport = async (req, res) => {
         [candidateId]
       );
 
-      targetSession = latest.rows[0]?.session_id;
+      targetSession =
+        latest.rows[0]?.session_id;
     }
 
     if (!targetSession) {
@@ -305,7 +444,9 @@ export const generateReport = async (req, res) => {
         ? Number(
             (
               answers.reduce(
-                (sum, row) => sum + Number(row.ai_score || 0),
+                (sum, row) =>
+                  sum +
+                  Number(row.ai_score || 0),
                 0
               ) / answers.length
             ).toFixed(2)
@@ -333,7 +474,10 @@ export const generateReport = async (req, res) => {
       answers,
     });
   } catch (err) {
-    console.error("Analysis error", err);
+    console.error(
+      "Analysis error",
+      err
+    );
 
     return res.status(500).json({
       error: "Analysis failed",

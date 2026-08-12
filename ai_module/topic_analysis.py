@@ -8,7 +8,12 @@ def analyze_topics(questions, user_answers):
         q = questions[i]
         ans = user_answers[i]
 
-        result = evaluate_answer(ans, q["answer"])
+        result = evaluate_answer(
+        ans,
+        q["answer"],
+        role=q.get("role", "General"),
+        company=q.get("company", "General")
+        )
         score = result["final_score"]
 
         topic = q["topic"]
