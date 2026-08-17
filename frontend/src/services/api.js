@@ -307,19 +307,12 @@ export const codingAPI = {
     return await handleResponse(res);
   },
 
+  // FIXED: Properly passes candidateId, attemptId, and submissions payload directly
   submitCode: async (payload) => {
-    const data = {
-      candidateId: payload.candidateId ?? 1,
-      questionId: payload.questionId,
-      code: payload.code,
-      language_id: payload.language_id || payload.language,
-      testCases: payload.testCases || payload.hiddenTestCases || []
-    };
-
     const response = await fetch(`${BASE_URL}/code/submit`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
+      body: JSON.stringify(payload),
     });
     return await handleResponse(response);
   },

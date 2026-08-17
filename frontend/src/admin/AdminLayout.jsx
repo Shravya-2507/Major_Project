@@ -3,12 +3,18 @@ import Sidebar from "./components/Sidebar";
 
 export default function AdminLayout() {
   return (
-    <div className="flex min-h-screen bg-gray-100">
-      <Sidebar />
+    <div className="flex min-h-screen bg-gradient-to-br from-purple-50 via-blue-50 to-pink-50">
 
-      <div className="flex-1 p-8 overflow-y-auto">
+      {/* Sidebar */}
+      <aside className="w-64 bg-white/70 backdrop-blur-xl border-r border-white/40 shadow-xl">
+        <Sidebar />
+      </aside>
+
+      {/* Main Content */}
+      <main className="flex-1 p-8 overflow-y-auto">
         <Outlet />
-      </div>
+      </main>
+
     </div>
   );
 }

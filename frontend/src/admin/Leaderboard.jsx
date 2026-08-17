@@ -4,67 +4,197 @@ import api from "../services/api";
 export default function Leaderboard() {
 
   const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+
 
   useEffect(() => {
     loadLeaderboard();
   }, []);
 
+
+
   async function loadLeaderboard() {
-    const res = await api.get("/admin/leaderboard/overall");
-    setRows(res.data.data);
+
+    try {
+
+      const res = await api.get("/admin/leaderboard/overall");
+
+      setRows(res.data.data || []);
+
+    } catch (error) {
+
+      console.error("Leaderboard Error:", error);
+
+    } finally {
+
+      setLoading(false);
+
+    }
+
   }
 
-  return (
-    <div className="p-8">
 
-      <h1 className="text-3xl font-bold mb-6">
-        Overall Leaderboard
+
+  const getRankStyle = (rank) => {
+
+    if (rank === 1)
+      return "bg-yellow-100 text-yellow-700 font-bold";
+
+    if (rank === 2)
+      return "bg-gray-100 text-gray-700 font-bold";
+
+    if (rank === 3)
+      return "bg-orange-100 text-orange-700 font-bold";
+
+    return "";
+
+  };
+
+
+
+  return (
+
+    <main className="min-h-screen bg-gradient-to-br from-purple-50 via-blue-50 to-pink-50 p-8">
+
+
+      <h1 className="text-4xl font-bold text-purple-700 mb-8">
+        🏆 Overall Leaderboard
       </h1>
 
-      <table className="w-full border">
 
-        <thead className="bg-gray-200">
 
-          <tr>
+      <div className="bg-white/70 backdrop-blur-xl rounded-2xl shadow-xl p-6">
 
-            <th className="border p-2">Rank</th>
 
-            <th className="border p-2">Name</th>
+        {loading ? (
 
-            <th className="border p-2">Average</th>
+          <p className="text-center text-gray-500">
+            Loading leaderboard...
+          </p>
 
-            <th className="border p-2">Highest</th>
+        ) : rows.length === 0 ? (
 
-            <th className="border p-2">Tests</th>
+          <p className="text-center text-gray-500">
+            No leaderboard data available
+          </p>
 
-          </tr>
+        ) : (
 
-        </thead>
+          <div className="overflow-x-auto">
 
-        <tbody>
 
-          {rows.map((r) => (
+            <table className="w-full border-collapse">
 
-            <tr key={r.id}>
 
-              <td className="border p-2">{r.overall_rank}</td>
+              <thead>
 
-              <td className="border p-2">{r.name}</td>
+                <tr className="border-b bg-purple-100">
 
-              <td className="border p-2">{r.average_score}</td>
+                  <th className="p-4 text-left">
+                    Rank
+                  </th>
 
-              <td className="border p-2">{r.highest_score}</td>
+                  <th className="p-4 text-left">
+                    Candidate
+                  </th>
 
-              <td className="border p-2">{r.tests_attempted}</td>
+                  <th className="p-4 text-left">
+                    Average Score
+                  </th>
 
-            </tr>
+                  <th className="p-4 text-left">
+                    Highest Score
+                  </th>
 
-          ))}
+                  <th className="p-4 text-left">
+                    Tests Attempted
+                  </th>
 
-        </tbody>
+                </tr>
 
-      </table>
+              </thead>
 
-    </div>
+
+
+              <tbody>
+
+
+                {rows.map((r) => (
+
+                  <tr
+                    key={r.id}
+                    className="border-b hover:bg-purple-50 transition"
+                  >
+
+
+                    <td className="p-4">
+
+                      <span
+                        className={`px-3 py-1 rounded-full ${getRankStyle(
+                          r.overall_rank
+                        )}`}
+                      >
+
+                        #{r.overall_rank}
+
+                      </span>
+
+                    </td>
+
+
+
+                    <td className="p-4 font-semibold">
+
+                      {r.name}
+
+                    </td>
+
+
+
+                    <td className="p-4 text-purple-700 font-bold">
+
+                      {r.average_score}
+
+                    </td>
+
+
+
+                    <td className="p-4 text-green-600 font-semibold">
+
+                      {r.highest_score}
+
+                    </td>
+
+
+
+                    <td className="p-4">
+
+                      {r.tests_attempted}
+
+                    </td>
+
+
+                  </tr>
+
+                ))}
+
+
+              </tbody>
+
+
+            </table>
+
+
+          </div>
+
+        )}
+
+
+      </div>
+
+
+    </main>
+
   );
+
 }
