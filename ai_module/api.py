@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Optional
 from fastapi.middleware.cors import CORSMiddleware
 import logging
@@ -15,8 +15,10 @@ from resume.achievement_analyzer import analyze_achievements
 from resume.feedback_generator import generate_feedback
 
 from interview.question_generator import generate_question
+from interview.interview_feedback import generate_interview_report
 
 from answer_evaluation import evaluate_answer
+
 
 from topic_analysis import (
     analyze_topics,
@@ -55,8 +57,8 @@ app.add_middleware(
 # =========================================================
 
 class AnswerRequest(BaseModel):
+    question: str
     student_answer: str
-    correct_answer: str
     role: str = "General"
     company: str = "General"
 
@@ -84,34 +86,37 @@ class QuestionGenerationRequest(BaseModel):
     topic: str
     question_type: str = "Technical"
     category: str = "Conceptual"
-    history: List[dict] = []
+
+    # Avoid mutable default list
+    history: List[dict] = Field(default_factory=list)
 
 
 class AdaptiveQuestionRequest(BaseModel):
     role: str
     company: str = "General"
     question_type: str = "Technical"
-
     questions: List[Question]
     user_answers: List[str]
 
 
 # =========================================================
-# NEW MODEL
 # FINAL INTERVIEW EVALUATION
 # =========================================================
 
 class InterviewEvaluationItem(BaseModel):
     question: str
-    correct_answer: str
     student_answer: str
     topic: str = "General"
+
+    # Scores obtained from /evaluate
+    llm_score: float
+    smith_waterman_score: float
+    final_score: float
 
 
 class FinalInterviewEvaluationRequest(BaseModel):
     role: str = "General"
     company: str = "General"
-
     answers: List[InterviewEvaluationItem]
 
 
@@ -121,7 +126,6 @@ class FinalInterviewEvaluationRequest(BaseModel):
 
 @app.get("/")
 def home():
-
     return {
         "message": "AI Module API is running 🚀"
     }
@@ -138,24 +142,32 @@ def evaluate(req: AnswerRequest):
 
         result = evaluate_answer(
             req.student_answer,
-            req.correct_answer,
+            question=req.question,
             role=req.role,
             company=req.company
         )
 
-        return result
+        return {
+            "success": True,
+            "llm_score": result.get("llm_score", 0),
+            "smith_waterman_score": result.get(
+                "smith_waterman_score", 0
+            ),
+            "final_score": result.get("final_score", 0)
+        }
 
     except Exception:
 
         logging.error(traceback.format_exc())
 
         return {
+            "success": False,
             "error": "Evaluation failed"
         }
 
 
 # =========================================================
-# FINAL EVALUATION OF ALL 10 ANSWERS
+# FINAL EVALUATION OF ALL ANSWERS
 # =========================================================
 
 @app.post("/evaluate-interview")
@@ -168,328 +180,111 @@ def evaluate_interview(
         if not req.answers:
 
             return {
+                "success": False,
                 "error": "No answers provided"
             }
 
         logging.info(
-            f"Evaluating final interview: "
+            f"Final interview evaluation: "
             f"{len(req.answers)} answers"
         )
 
-        results = []
-
-        total_score = 0
-
         # =================================================
-        # EVALUATE EACH ANSWER
+        # PREPARE QUESTIONS
         # =================================================
 
-        for index, item in enumerate(req.answers):
+        questions = []
 
-            logging.info(
-                f"Evaluating question {index + 1}"
-            )
+        for item in req.answers:
 
-            result = evaluate_answer(
-
-                item.student_answer,
-
-                item.correct_answer,
-
-                role=req.role,
-
-                company=req.company
-            )
-
-            score = float(
-                result.get("final_score", 0)
-            )
-
-            total_score += score
-
-            results.append({
-
-                "question_number": index + 1,
-
+            questions.append({
                 "question": item.question,
+                "topic": item.topic
+            })
 
-                "topic": item.topic,
+        # =================================================
+        # USE SCORES ALREADY CALCULATED BY /evaluate
+        # =================================================
+
+        evaluations = []
+
+        for item in req.answers:
+
+            # Safety: keep scores between 0 and 100
+
+            llm_score = max(
+                0,
+                min(float(item.llm_score), 100)
+            )
+
+            smith_waterman_score = max(
+                0,
+                min(float(item.smith_waterman_score), 100)
+            )
+
+            final_score = max(
+                0,
+                min(float(item.final_score), 100)
+            )
+
+            evaluations.append({
+
+                "question":
+                    item.question,
 
                 "student_answer":
                     item.student_answer,
 
-                "correct_answer":
-                    item.correct_answer,
-
-                "score": round(
-                    score,
-                    2
-                ),
+                "topic":
+                    item.topic,
 
                 "llm_score":
-                    result.get(
-                        "llm_score",
-                        0
+                    round(
+                        llm_score,
+                        2
                     ),
 
                 "smith_waterman_score":
-                    result.get(
-                        "smith_waterman_score",
-                        result.get(
-                            "keyword_match_score",
-                            0
-                        )
+                    round(
+                        smith_waterman_score,
+                        2
                     ),
 
-                "result":
-                    result.get(
-                        "result",
-                        "Unknown"
-                    ),
-
-                "feedback":
-                    result.get(
-                        "feedback",
-                        ""
-                    ),
-
-                "strengths":
-                    result.get(
-                        "strengths",
-                        []
-                    ),
-
-                "missing_concepts":
-                    result.get(
-                        "missing_concepts",
-                        []
+                "final_score":
+                    round(
+                        final_score,
+                        2
                     )
             })
 
-
         # =================================================
-        # TOTAL SCORE
+        # GENERATE FINAL INTERVIEW REPORT
         # =================================================
+        #
+        # IMPORTANT:
+        # This does NOT call evaluate_answer().
+        #
+        # It uses the scores already calculated by /evaluate
+        # and generates ONE detailed overall feedback report.
+        #
 
-        question_count = len(results)
+        report = generate_interview_report(
 
-        total_score = (
-            total_score / question_count
+            role=req.role,
+
+            company=req.company,
+
+            questions=questions,
+
+            evaluations=evaluations
+
         )
 
-
         # =================================================
-        # SCORE CLASSIFICATION
-        # =================================================
-
-        if total_score >= 85:
-
-            overall_result = "Excellent"
-
-        elif total_score >= 75:
-
-            overall_result = "Very Good"
-
-        elif total_score >= 65:
-
-            overall_result = "Good"
-
-        elif total_score >= 50:
-
-            overall_result = "Needs Improvement"
-
-        else:
-
-            overall_result = "Beginner"
-
-
-        # =================================================
-        # TOPIC PERFORMANCE
+        # RETURN FINAL REPORT
         # =================================================
 
-        topic_scores = {}
-
-        for item in results:
-
-            topic = item["topic"]
-
-            if topic not in topic_scores:
-
-                topic_scores[topic] = []
-
-            topic_scores[topic].append(
-                item["score"]
-            )
-
-
-        topic_average = {}
-
-        for topic, scores in topic_scores.items():
-
-            topic_average[topic] = round(
-                sum(scores) / len(scores),
-                2
-            )
-
-
-        # =================================================
-        # STRONG / WEAK TOPICS
-        # =================================================
-
-        strongest_topic = None
-        weakest_topic = None
-
-        if topic_average:
-
-            strongest_topic = max(
-                topic_average,
-                key=topic_average.get
-            )
-
-            weakest_topic = min(
-                topic_average,
-                key=topic_average.get
-            )
-
-
-        # =================================================
-        # COLLECT STRENGTHS
-        # =================================================
-
-        strengths = []
-
-        for item in results:
-
-            for strength in item.get(
-                "strengths",
-                []
-            ):
-
-                if strength not in strengths:
-
-                    strengths.append(
-                        strength
-                    )
-
-
-        # =================================================
-        # COLLECT MISSING CONCEPTS
-        # =================================================
-
-        missing_concepts = []
-
-        for item in results:
-
-            for concept in item.get(
-                "missing_concepts",
-                []
-            ):
-
-                if concept not in missing_concepts:
-
-                    missing_concepts.append(
-                        concept
-                    )
-
-
-        # =================================================
-        # QUESTION FEEDBACK
-        # =================================================
-
-        question_feedback = []
-
-        for item in results:
-
-            question_feedback.append({
-
-                "question_number":
-                    item["question_number"],
-
-                "topic":
-                    item["topic"],
-
-                "score":
-                    item["score"],
-
-                "result":
-                    item["result"],
-
-                "feedback":
-                    item["feedback"],
-
-                "strengths":
-                    item["strengths"],
-
-                "missing_concepts":
-                    item["missing_concepts"]
-
-            })
-
-
-        # =================================================
-        # FINAL RESPONSE
-        # =================================================
-
-        return {
-
-            "success": True,
-
-            "role": req.role,
-
-            "company": req.company,
-
-            "total_questions":
-                question_count,
-
-            "total_score":
-                round(
-                    total_score,
-                    2
-                ),
-
-            "percentage":
-                round(
-                    total_score,
-                    2
-                ),
-
-            "overall_result":
-                overall_result,
-
-            "strongest_topic":
-                strongest_topic,
-
-            "weakest_topic":
-                weakest_topic,
-
-            "topic_scores":
-                topic_average,
-
-            "strengths":
-                strengths,
-
-            "missing_concepts":
-                missing_concepts,
-
-            "question_feedback":
-                question_feedback,
-
-            "answers":
-                results,
-
-            "evaluation_method": {
-
-                "llm_weight": "80%",
-
-                "smith_waterman_weight":
-                    "20%",
-
-                "description":
-                    "Each answer is evaluated using LLM semantic understanding and Smith-Waterman sequence similarity. The final interview score is the average of all individual answer scores."
-
-            }
-
-        }
+        return report
 
     except Exception as e:
 
@@ -501,7 +296,8 @@ def evaluate_interview(
 
             "success": False,
 
-            "error": str(e),
+            "error":
+                str(e),
 
             "message":
                 "Final interview evaluation failed"
@@ -514,7 +310,9 @@ def evaluate_interview(
 # =========================================================
 
 @app.post("/analyze-topics")
-def analyze(req: TopicAnalysisRequest):
+def analyze(
+    req: TopicAnalysisRequest
+):
 
     try:
 
@@ -596,7 +394,8 @@ def analyze(req: TopicAnalysisRequest):
 
         return {
 
-            "error": str(e),
+            "error":
+                str(e),
 
             "message":
                 "Topic analysis failed"
@@ -725,7 +524,8 @@ async def analyze_resume(
 
             "overall_score": 0,
 
-            "error": str(e),
+            "error":
+                str(e),
 
             "message":
                 "Resume analysis failed."
@@ -790,7 +590,8 @@ def generate_interview_question(
 
         return {
 
-            "error": str(e)
+            "error":
+                str(e)
 
         }
 
@@ -805,6 +606,22 @@ def next_question(
 ):
 
     try:
+
+        if not req.questions:
+
+            return {
+                "error":
+                    "No previous questions provided"
+            }
+
+        if len(req.questions) != len(
+            req.user_answers
+        ):
+
+            return {
+                "error":
+                    "Mismatch in questions and answers"
+            }
 
         questions = [
             q.model_dump()
@@ -823,10 +640,8 @@ def next_question(
         if not topic_avg:
 
             return {
-
                 "error":
                     "Unable to analyze topics"
-
             }
 
         pagerank = pagerank_topics(
@@ -844,7 +659,8 @@ def next_question(
 
         history = [
             {
-                "score": score
+                "score":
+                    score
             }
         ]
 
@@ -871,7 +687,9 @@ def next_question(
                 weakest_topic,
 
             "difficulty":
-                question["difficulty"],
+                question.get(
+                    "difficulty"
+                ),
 
             "topic_scores":
                 topic_avg,
@@ -889,7 +707,8 @@ def next_question(
 
         return {
 
-            "error": str(e),
+            "error":
+                str(e),
 
             "message":
                 "Adaptive question generation failed"

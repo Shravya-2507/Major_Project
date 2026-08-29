@@ -1,7 +1,12 @@
+import json
+import re
+
 from llama.llama_client import ask_llama
 from rag.retrieve import retrieve_context
 from interview.company_profiles import COMPANY_STYLE
 from interview.interview_engine import adjust_difficulty
+
+
 def generate_question(
     role,
     company,
@@ -10,38 +15,47 @@ def generate_question(
     question_type="Technical",
     category="Conceptual"
 ):
-    
     """
-    Generate a single interview question using:
+    Generate a single interview question and an expected answer using:
     - RAG knowledge base
     - Company interview profile
     - Llama 3.1
+    - Adaptive difficulty
     """
+
     # -----------------------------
     # Adaptive Difficulty
     # -----------------------------
-    
+
     difficulty = adjust_difficulty(
         history or []
     )
+
     performance = history[-3:] if history else []
 
     # -----------------------------
     # Retrieve relevant context
     # -----------------------------
+
     context = retrieve_context(
         role=role,
         company=company,
         topic=topic
     )
+
     if not context:
-        context = "No reference material available. Use general interview knowledge."
+        context = (
+            "No reference material available. "
+            "Use general interview knowledge."
+        )
+
     # -----------------------------
     # Company Profile
     # -----------------------------
+
     profile = COMPANY_STYLE.get(
-    company.lower() if company else "",
-    {}
+        company.lower() if company else "",
+        {}
     )
 
     interview_style = ", ".join(
@@ -75,10 +89,11 @@ def generate_question(
     # -----------------------------
     # Prompt
     # -----------------------------
+
     prompt = f"""
 You are an expert technical interviewer.
 
-Generate ONE interview question.
+Generate ONE interview question and its expected answer.
 
 =====================================
 REFERENCE MATERIAL
@@ -129,6 +144,7 @@ Available Categories:
 - Debugging
 - System Design
 - Scenario Based
+
 =====================================
 COMPANY PROFILE
 =====================================
@@ -158,60 +174,209 @@ Behavioral Round:
 INSTRUCTIONS
 =====================================
 
-1. Generate ONLY ONE interview question.
+1. Generate exactly ONE interview question.
 
-2. Do NOT generate the answer.
-Do not include:
-- Answer
-- Explanation
-- Code solution
-- Markdown formatting
-- Numbering
+2. Generate ONE technically correct expected answer
+   for that question.
 
-3. Question must match the requested difficulty.
+3. The expected answer should contain the important
+   concepts that a strong candidate should mention.
 
-4. Prefer the reference material whenever relevant.
+4. The expected answer should be concise but complete.
 
-5. Follow the company's interview style.
+5. The question must match the requested difficulty.
 
-6. If insufficient reference material is available, generate a realistic interview question based on company expectations.
+6. Prefer the reference material whenever relevant.
 
-7. Make the question role-specific.
+7. Follow the company's interview style.
+
+8. Make the question role-specific.
+
 Examples:
-- Software Developer → DSA, OOP, system design, debugging
-- Python Developer → Python internals, libraries, APIs
-- Full Stack Developer → frontend, backend, database, deployment
-- AI/ML Intern → ML algorithms, preprocessing, model evaluation
-- Java Developer → Java, Spring Boot, JVM, multithreading
 
-8. Keep the question concise.
+Software Developer:
+- DSA
+- OOP
+- System Design
+- Debugging
 
-Return ONLY the interview question.
+Python Developer:
+- Python internals
+- OOP
+- Libraries
+- APIs
+- Performance
+
+Full Stack Developer:
+- Frontend
+- Backend
+- Database
+- APIs
+- Deployment
+
+AI/ML Intern:
+- ML algorithms
+- Preprocessing
+- Model evaluation
+- Feature engineering
+
+Java Developer:
+- Java
+- Spring Boot
+- JVM
+- Multithreading
+
+9. Do not generate multiple questions.
+
+10. Return ONLY valid JSON.
+
+Use exactly this format:
+
+{{
+    "question": "interview question here",
+    "expected_answer": "technically correct expected answer here"
+}}
 """
 
-    question = ask_llama(prompt)
+    # -----------------------------
+    # Call Llama
+    # -----------------------------
 
-    if not question:
-        question = (
-            f"Explain an important {topic} concept "
-            f"for a {role} interview."
+    response = ask_llama(prompt)
+
+    # -----------------------------
+    # Fallback
+    # -----------------------------
+
+    if not response:
+        return {
+            "question": (
+                f"Explain an important {topic} concept "
+                f"for a {role} interview."
+            ),
+            "expected_answer": (
+                f"Provide a technically correct explanation "
+                f"of the important concepts related to {topic}."
+            ),
+            "difficulty": difficulty,
+            "topic": topic,
+            "company": company,
+            "role": role
+        }
+
+    # -----------------------------
+    # Parse LLM JSON
+    # -----------------------------
+
+    try:
+        response = response.strip()
+
+        # Remove markdown code fences
+        response = re.sub(
+            r"```json\s*",
+            "",
+            response,
+            flags=re.IGNORECASE
         )
+
+        response = re.sub(
+            r"```\s*",
+            "",
+            response
+        )
+
+        # Find JSON object
+        match = re.search(
+            r"\{.*\}",
+            response,
+            re.DOTALL
+        )
+
+        if not match:
+            raise ValueError(
+                "No JSON object found in LLM response"
+            )
+
+        data = json.loads(
+            match.group(0)
+        )
+
+        question = str(
+            data.get("question", "")
+        ).strip()
+
+        expected_answer = str(
+            data.get("expected_answer", "")
+        ).strip()
+
+        # -----------------------------
+        # Validate generated content
+        # -----------------------------
+
+        if not question:
+            question = (
+                f"Explain an important {topic} concept "
+                f"for a {role} interview."
+            )
+
+        if not expected_answer:
+            expected_answer = (
+                f"Provide a technically correct explanation "
+                f"of the important concepts related to {topic}."
+            )
+
+    except Exception as error:
+
+        print(
+            "Question generation JSON parsing error:",
+            error
+        )
+
+        print(
+            "Raw LLM response:",
+            response
+        )
+
+        question = response.strip()
+
+        expected_answer = (
+            f"Provide a technically correct explanation "
+            f"of the important concepts related to {topic}."
+        )
+
+    # -----------------------------
+    # Clean question
+    # -----------------------------
 
     for prefix in [
         "Here is your question:",
         "Question:",
         "Interview Question:"
     ]:
-        question = question.replace(prefix, "")
-    question=question.strip()
-    question = question.split("\n")[0]
-    question=question.lstrip("0123456789.- ")
-    return {
-    "question": question,
-    "difficulty": difficulty,
-    "topic": topic,
-    "company": company,
-    "role": role
-}
+        question = question.replace(
+            prefix,
+            ""
+        )
 
-    
+    question = question.strip()
+
+    question = (
+        question
+        .split("\n")[0]
+        .lstrip("0123456789.- ")
+        .strip()
+    )
+
+    # -----------------------------
+    # Return
+    # -----------------------------
+
+    return {
+        "question": question,
+        "expected_answer": expected_answer,
+        "difficulty": difficulty,
+        "topic": topic,
+        "company": company,
+        "role": role
+    }
+

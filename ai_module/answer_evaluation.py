@@ -6,7 +6,7 @@ from smith_waterman import smith_waterman
 
 
 # ============================================================
-# LLM EVALUATION
+# LLM SCORE EVALUATION
 # ============================================================
 
 def llm_evaluate_answer(
@@ -16,16 +16,15 @@ def llm_evaluate_answer(
     company="General"
 ):
     """
-    Evaluate a candidate's interview answer using Llama.
+    Evaluate one interview answer using Llama.
 
-    The LLM evaluates:
-    - Correctness
-    - Concept coverage
-    - Technical accuracy
-    - Relevance
-    - Completeness
+    The LLM returns:
+    - score
+    - ideal_answer
 
-    Returns a score from 0-100.
+    Individual feedback is NOT generated here.
+    Detailed feedback is generated only by interview_feedback.py
+    after the complete interview is submitted.
     """
 
     prompt = f"""
@@ -59,20 +58,20 @@ CANDIDATE ANSWER
 EVALUATION CRITERIA
 ========================================
 
-Evaluate the answer based on:
+Evaluate ONLY:
 
 1. Technical correctness
 2. Concept understanding
 3. Important concept coverage
-4. Relevance to the question
+4. Relevance
 5. Completeness
-6. Accuracy of terminology
+6. Technical accuracy
 7. Quality of explanation
 
-Do NOT give credit merely because the candidate
+Do NOT give credit simply because the candidate
 uses words similar to the question.
 
-The answer must demonstrate actual understanding.
+The candidate must demonstrate actual understanding.
 
 ========================================
 SCORING
@@ -98,6 +97,24 @@ Some relevant knowledge but significant gaps.
 Incorrect or irrelevant answer.
 
 ========================================
+IDEAL ANSWER
+========================================
+
+Generate a concise expert/reference answer.
+
+The ideal answer must be based ONLY on:
+
+- The interview question
+- Candidate role
+- Target company
+- General technical knowledge
+
+Do NOT use the candidate answer to construct
+the ideal answer.
+
+Do NOT copy, paraphrase, or adapt the candidate answer.
+
+========================================
 IMPORTANT
 ========================================
 
@@ -107,32 +124,31 @@ Use exactly this format:
 
 {{
     "score": 0,
-    "feedback": "short explanation",
-    "strengths": ["strength 1", "strength 2"],
-    "missing_concepts": ["concept 1", "concept 2"]
+    "ideal_answer": "concise technically correct ideal answer"
 }}
 
 The score MUST be a number between 0 and 100.
 """
+
 
     response = ask_llama(prompt)
 
     if not response:
         return {
             "score": 0,
-            "feedback": "LLM evaluation failed.",
-            "strengths": [],
-            "missing_concepts": []
+            "ideal_answer": ""
         }
 
-    # --------------------------------------------------------
-    # Extract JSON safely
-    # --------------------------------------------------------
+
+    # ========================================================
+    # SAFE JSON PARSING
+    # ========================================================
 
     try:
+
         response = response.strip()
 
-        # Remove markdown code fences if Llama adds them
+        # Remove markdown code fences
         response = re.sub(
             r"```json\s*",
             "",
@@ -146,7 +162,7 @@ The score MUST be a number between 0 and 100.
             response
         )
 
-        # Find JSON object if extra text exists
+        # Find JSON object
         match = re.search(
             r"\{.*\}",
             response,
@@ -169,25 +185,12 @@ The score MUST be a number between 0 and 100.
 
         return {
             "score": score,
-
-            "feedback":
-                data.get(
-                    "feedback",
-                    "No feedback provided."
-                ),
-
-            "strengths":
-                data.get(
-                    "strengths",
-                    []
-                ),
-
-            "missing_concepts":
-                data.get(
-                    "missing_concepts",
-                    []
-                )
+            "ideal_answer": data.get(
+                "ideal_answer",
+                ""
+            )
         }
+
 
     except Exception as error:
 
@@ -203,10 +206,7 @@ The score MUST be a number between 0 and 100.
 
         return {
             "score": 0,
-            "feedback":
-                "Unable to parse LLM evaluation.",
-            "strengths": [],
-            "missing_concepts": []
+            "ideal_answer": ""
         }
 
 
@@ -216,7 +216,6 @@ The score MUST be a number between 0 and 100.
 
 def evaluate_answer(
     ans,
-    correct=None,
     question="",
     role="General",
     company="General"
@@ -229,16 +228,13 @@ def evaluate_answer(
         LLM             -> 80%
         Smith-Waterman  -> 20%
 
-    `correct` is optional.
+    This function ONLY calculates the individual score.
 
-    For dynamically generated questions, the LLM
-    evaluates the answer directly against the question.
+    Detailed interview feedback is generated later by:
 
-    If an expected answer exists, Smith-Waterman
-    compares the candidate answer against it.
+        interview_feedback.py
 
-    If expected answer does not exist, the LLM feedback
-    is used as the reference text for Smith-Waterman.
+    through /evaluate-interview.
     """
 
     print(
@@ -269,8 +265,9 @@ def evaluate_answer(
         "=============================================="
     )
 
+
     # ========================================================
-    # Validate answer
+    # VALIDATE ANSWER
     # ========================================================
 
     if not ans or not str(ans).strip():
@@ -278,27 +275,36 @@ def evaluate_answer(
         return {
             "llm_score": 0,
             "smith_waterman_score": 0,
+            "keyword_match_score": 0,
             "final_score": 0,
-
             "result": "Incorrect",
-
-            "feedback":
-                "No answer was provided.",
-
-            "strengths": [],
-
-            "missing_concepts": [],
-
+            "ideal_answer": "",
             "evaluation_method": {
                 "llm_weight": "80%",
                 "smith_waterman_weight": "20%"
-            },
-
-            "context": {
-                "role": role,
-                "company": company
             }
         }
+
+
+    # ========================================================
+    # VALIDATE QUESTION
+    # ========================================================
+
+    if not question or not str(question).strip():
+
+        return {
+            "llm_score": 0,
+            "smith_waterman_score": 0,
+            "keyword_match_score": 0,
+            "final_score": 0,
+            "result": "Evaluation Failed",
+            "ideal_answer": "",
+            "evaluation_method": {
+                "llm_weight": "80%",
+                "smith_waterman_weight": "20%"
+            }
+        }
+
 
     # ========================================================
     # 1. LLM EVALUATION
@@ -315,47 +321,30 @@ def evaluate_answer(
         llm_result.get("score", 0)
     )
 
+
     # ========================================================
-    # 2. Smith-Waterman
+    # 2. GET IDEAL ANSWER
     # ========================================================
 
-    # Normally use the database expected answer.
-    reference_text = correct
+    ideal_answer = llm_result.get(
+        "ideal_answer",
+        ""
+    )
 
-    # --------------------------------------------------------
-    # For AI-generated questions, expected_answer may be NULL.
-    #
-    # In that case use the LLM feedback as supporting reference.
-    # --------------------------------------------------------
 
-    if not reference_text:
+    # ========================================================
+    # 3. SMITH-WATERMAN
+    # ========================================================
 
-        reference_text = (
-            llm_result.get("feedback", "")
-        )
+    sw_score = 0.0
 
-        missing = llm_result.get(
-            "missing_concepts",
-            []
-        )
-
-        if missing:
-            reference_text += " " + " ".join(
-                str(item)
-                for item in missing
-            )
-
-    # --------------------------------------------------------
-    # Calculate Smith-Waterman score
-    # --------------------------------------------------------
-
-    if reference_text:
+    if ideal_answer:
 
         try:
 
             sw_score = smith_waterman(
                 str(ans),
-                str(reference_text)
+                str(ideal_answer)
             ) * 100
 
         except Exception as error:
@@ -365,19 +354,17 @@ def evaluate_answer(
                 error
             )
 
-            sw_score = 0
+            sw_score = 0.0
 
-    else:
-
-        sw_score = 0
 
     sw_score = max(
         0,
         min(float(sw_score), 100)
     )
 
+
     # ========================================================
-    # 3. FINAL SCORE
+    # 4. FINAL SCORE
     #
     # LLM             = 80%
     # Smith-Waterman  = 20%
@@ -394,14 +381,16 @@ def evaluate_answer(
         min(final_score, 100)
     )
 
+
     # ========================================================
-    # 4. Classification
+    # 5. CLASSIFICATION
     # ========================================================
 
     result = get_result(
         final_score,
         role
     )
+
 
     # ========================================================
     # DEBUG
@@ -431,8 +420,9 @@ def evaluate_answer(
         "========================================"
     )
 
+
     # ========================================================
-    # Return
+    # RETURN
     # ========================================================
 
     return {
@@ -447,7 +437,7 @@ def evaluate_answer(
             2
         ),
 
-        # Keep old name for frontend compatibility
+        # Backward compatibility
         "keyword_match_score": round(
             sw_score,
             2
@@ -460,23 +450,9 @@ def evaluate_answer(
 
         "result": result,
 
-        "feedback":
-            llm_result.get(
-                "feedback",
-                "No feedback."
-            ),
-
-        "strengths":
-            llm_result.get(
-                "strengths",
-                []
-            ),
-
-        "missing_concepts":
-            llm_result.get(
-                "missing_concepts",
-                []
-            ),
+        # Needed internally for scoring/debugging
+        # but NOT displayed as individual feedback
+        "ideal_answer": ideal_answer,
 
         "evaluation_method": {
             "llm_weight": "80%",

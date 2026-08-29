@@ -2,86 +2,154 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { fetchRoles, fetchCompanies } from "../services/api";
 
+const TOTAL_QUESTIONS = 5;
+
+const TOPICS = [
+  "General",
+  "Programming",
+  "Data Structures",
+  "Algorithms",
+  "Object-Oriented Programming",
+  "Database",
+  "Web Development",
+  "System Design",
+];
+
 export default function MockInterview() {
-  const [roles, setRoles] = useState([]);
-  const [companies, setCompanies] = useState([]);
-  const [selectedRole, setSelectedRole] = useState("");
-  const [selectedCompany, setSelectedCompany] = useState(""); // Empty string = General
-  const [loading, setLoading] = useState(true);
-  const [rolesLoading, setRolesLoading] = useState(false); // Sub-loading for role filtering
   const navigate = useNavigate();
 
-  // 1. Initial Load: Just get companies
+  // =========================================
+  // State
+  // =========================================
+  const [roles, setRoles] = useState([]);
+  const [companies, setCompanies] = useState([]);
+
+  const [selectedRole, setSelectedRole] = useState("");
+  const [selectedCompany, setSelectedCompany] = useState("");
+  const [selectedTopic, setSelectedTopic] = useState("General");
+
+  const [loading, setLoading] = useState(true);
+  const [rolesLoading, setRolesLoading] = useState(false);
+
+  // =========================================
+  // LOAD COMPANIES
+  // =========================================
   useEffect(() => {
     const initLoad = async () => {
       try {
         setLoading(true);
+
         const companiesData = await fetchCompanies();
-        setCompanies(companiesData || []);
+
+        setCompanies(
+          Array.isArray(companiesData)
+            ? companiesData
+            : []
+        );
+
       } catch (err) {
-        console.error("Error fetching companies:", err);
+        console.error(
+          "Error fetching companies:",
+          err
+        );
+
+        setCompanies([]);
+
       } finally {
         setLoading(false);
       }
     };
+
     initLoad();
   }, []);
 
-  // 2. Chained Load: Whenever selectedCompany changes, update roles
- useEffect(() => {
-  const updateRoles = async () => {
-    setRolesLoading(true);
-    const rolesData = await fetchRoles(selectedCompany);
-    setRoles(rolesData);
+  // =========================================
+  // LOAD ROLES WHEN COMPANY CHANGES
+  // =========================================
+  useEffect(() => {
+    const updateRoles = async () => {
+      try {
+        setRolesLoading(true);
 
-    if (rolesData.length > 0) {
-      setSelectedRole(rolesData[0].id); // Select the first valid role
-    } else {
-      setSelectedRole(""); // Reset if no roles exist for this company
-    }
-    setRolesLoading(false);
-  };
+        const rolesData =
+          await fetchRoles(selectedCompany);
 
-<<<<<<< Updated upstream
-  updateRoles();
-}, [selectedCompany]);
+        const validRoles =
+          Array.isArray(rolesData)
+            ? rolesData
+            : [];
 
+        setRoles(validRoles);
+
+        // Automatically select first role
+        if (validRoles.length > 0) {
+          setSelectedRole(
+            validRoles[0].id
+          );
+        } else {
+          setSelectedRole("");
+        }
+
+      } catch (err) {
+        console.error(
+          "Error fetching roles:",
+          err
+        );
+
+        setRoles([]);
+        setSelectedRole("");
+
+      } finally {
+        setRolesLoading(false);
+      }
+    };
+
+    updateRoles();
+  }, [selectedCompany]);
+
+  // =========================================
+  // START INTERVIEW
+  // =========================================
   const handleStart = () => {
-    if (!selectedRole) return alert("Please select a role to begin.");
 
-    navigate("/interview", {
-      state: {
-        roleId: Number(selectedRole),
-        // If empty string, send null to backend for "General" logic
-        companyId: selectedCompany ? Number(selectedCompany) : null,
-=======
-    // =========================================
-    // Find Selected Role
-    // =========================================
-    const selectedRoleObject = roles.find(
-      (r) =>
-        String(r.id) === String(selectedRole)
-    );
+    // -----------------------------------------
+    // Validate role
+    // -----------------------------------------
+    if (!selectedRole) {
+      alert("Please select a role.");
+      return;
+    }
+
+    // -----------------------------------------
+    // Find selected role
+    // -----------------------------------------
+    const selectedRoleObject =
+      roles.find(
+        (role) =>
+          String(role.id) ===
+          String(selectedRole)
+      );
 
     if (!selectedRoleObject) {
-      return alert(
+      alert(
         "Unable to find the selected role."
       );
+      return;
     }
 
-    // =========================================
-    // Find Selected Company
-    // =========================================
+    // -----------------------------------------
+    // Find selected company
+    // -----------------------------------------
     const selectedCompanyObject =
       companies.find(
-        (c) =>
-          String(c.id) ===
+        (company) =>
+          String(company.id) ===
           String(selectedCompany)
       );
 
-    // =========================================
-    // Get Names
-    // =========================================
+    // -----------------------------------------
+    // Get names
+    // -----------------------------------------
     const roleName =
       selectedRoleObject.role_name;
 
@@ -89,9 +157,9 @@ export default function MockInterview() {
       selectedCompanyObject?.company_name ||
       "General";
 
-    // =========================================
-    // Get Candidate
-    // =========================================
+    // -----------------------------------------
+    // Get logged-in user
+    // -----------------------------------------
     const savedUser =
       localStorage.getItem("user");
 
@@ -99,30 +167,44 @@ export default function MockInterview() {
       ? JSON.parse(savedUser)
       : null;
 
+    // -----------------------------------------
+    // Interview information
+    // -----------------------------------------
+    const interviewInfo = {
+      candidateId: user?.id || null,
+
+      roleId: Number(selectedRole),
+
+      role: roleName,
+
+      companyId: selectedCompany
+        ? Number(selectedCompany)
+        : null,
+
+      company: companyName,
+
+      topic: selectedTopic || "General",
+
+      question_type: "Technical",
+
+      category: "Conceptual",
+
+      totalQuestions: TOTAL_QUESTIONS,
+    };
+
     console.log(
       "========== STARTING NEW INTERVIEW =========="
     );
 
-    console.log({
-      candidateId: user?.id || null,
-      roleId: Number(selectedRole),
-      role: roleName,
-      companyId: selectedCompany
-        ? Number(selectedCompany)
-        : null,
-      company: companyName,
-      topic: selectedTopic,
-      totalQuestions: 5,
-    });
+    console.log(interviewInfo);
 
     console.log(
       "============================================"
     );
 
-    // =========================================
-    // IMPORTANT:
+    // -----------------------------------------
     // Clear previous interview state
-    // =========================================
+    // -----------------------------------------
     sessionStorage.removeItem(
       "current_interview_questions"
     );
@@ -131,56 +213,23 @@ export default function MockInterview() {
       "current_interview_history"
     );
 
-    // =========================================
-    // Save Current Interview Information
-    // =========================================
-    sessionStorage.setItem(
-      "current_interview",
-      JSON.stringify({
-        roleId: Number(selectedRole),
-
-        role: roleName,
-
-        companyId: selectedCompany
-          ? Number(selectedCompany)
-          : null,
-
-        company: companyName,
-
-        topic: selectedTopic,
-
-        question_type: "Technical",
-
-        category: "Conceptual",
-
-        totalQuestions: 5,
-      })
+    sessionStorage.removeItem(
+      "current_interview"
     );
 
-    // =========================================
-    // Navigate To Interview Page
-    // =========================================
+    // -----------------------------------------
+    // Save current interview
+    // -----------------------------------------
+    sessionStorage.setItem(
+      "current_interview",
+      JSON.stringify(interviewInfo)
+    );
+
+    // -----------------------------------------
+    // Navigate to Interview
+    // -----------------------------------------
     navigate("/interview", {
-      state: {
-        roleId: Number(selectedRole),
-
-        role: roleName,
-
-        companyId: selectedCompany
-          ? Number(selectedCompany)
-          : null,
-
-        company: companyName,
-
-        topic: selectedTopic,
-
-        question_type: "Technical",
-
-        category: "Conceptual",
-
-        totalQuestions: 5,
->>>>>>> Stashed changes
-      },
+      state: interviewInfo,
     });
   };
 
@@ -189,70 +238,92 @@ export default function MockInterview() {
   // =========================================
   return (
     <div className="p-10 max-w-2xl mx-auto shadow-xl rounded-2xl bg-white border mt-10">
-      <h2 className="text-3xl font-bold mb-6 text-blue-700">Prepare Your Interview</h2>
-      
+
+      <h2 className="text-3xl font-bold mb-6 text-blue-700">
+        Prepare Your Interview
+      </h2>
+
       <div className="space-y-6">
-        {/* Company Selection */}
+
+        {/* =====================================
+            COMPANY
+        ====================================== */}
         <div>
-          <label className="block text-sm font-bold text-gray-700 mb-2">Target Company</label>
-          <select 
+          <label className="block text-sm font-bold text-gray-700 mb-2">
+            Target Company
+          </label>
+
+          <select
             className="w-full border-2 p-3 rounded-lg focus:border-blue-500 outline-none disabled:bg-gray-100"
             value={selectedCompany}
-<<<<<<< Updated upstream
-            onChange={(e) => setSelectedCompany(e.target.value)}
-=======
             onChange={(e) =>
-              setSelectedCompany(e.target.value)
+              setSelectedCompany(
+                e.target.value
+              )
             }
->>>>>>> Stashed changes
             disabled={loading}
           >
-            <option value="">-- General / Other Companies --</option>
-            {companies.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.company_name}
+            <option value="">
+              -- General / Other Companies --
+            </option>
+
+            {companies.map((company) => (
+              <option
+                key={company.id}
+                value={company.id}
+              >
+                {company.company_name}
               </option>
             ))}
           </select>
         </div>
 
-        {/* Role Selection */}
+        {/* =====================================
+            ROLE
+        ====================================== */}
         <div>
-          <label className="block text-sm font-bold text-gray-700 mb-2">Select Target Role</label>
-          <select 
+          <label className="block text-sm font-bold text-gray-700 mb-2">
+            Select Target Role
+          </label>
+
+          <select
             className="w-full border-2 p-3 rounded-lg focus:border-blue-500 outline-none disabled:bg-gray-100"
             value={selectedRole}
-<<<<<<< Updated upstream
-            onChange={(e) => setSelectedRole(e.target.value)}
-            disabled={loading || rolesLoading}
-=======
             onChange={(e) =>
-              setSelectedRole(e.target.value)
+              setSelectedRole(
+                e.target.value
+              )
             }
             disabled={
               loading ||
               rolesLoading
             }
->>>>>>> Stashed changes
           >
+
             {rolesLoading ? (
-              <option>Updating roles...</option>
+              <option>
+                Updating roles...
+              </option>
             ) : roles.length === 0 ? (
-              <option value="">No roles available for this company</option>
+              <option value="">
+                No roles available
+              </option>
             ) : (
-              roles.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.role_name}
+              roles.map((role) => (
+                <option
+                  key={role.id}
+                  value={role.id}
+                >
+                  {role.role_name}
                 </option>
               ))
             )}
+
           </select>
         </div>
 
-<<<<<<< Updated upstream
-=======
         {/* =====================================
-            Topic Selection
+            TOPIC
         ====================================== */}
         <div>
           <label className="block text-sm font-bold text-gray-700 mb-2">
@@ -263,18 +334,17 @@ export default function MockInterview() {
             className="w-full border-2 p-3 rounded-lg focus:border-blue-500 outline-none"
             value={selectedTopic}
             onChange={(e) =>
-              setSelectedTopic(e.target.value)
+              setSelectedTopic(
+                e.target.value
+              )
             }
             disabled={
               loading ||
               rolesLoading
             }
           >
-            <option value="">
-              -- Select Topic --
-            </option>
 
-            {topics.map((topic) => (
+            {TOPICS.map((topic) => (
               <option
                 key={topic}
                 value={topic}
@@ -282,33 +352,53 @@ export default function MockInterview() {
                 {topic}
               </option>
             ))}
+
           </select>
         </div>
 
         {/* =====================================
-            Interview Information
+            INTERVIEW INFORMATION
         ====================================== */}
         <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+
           <p className="text-sm text-blue-800">
-            <strong>Interview format:</strong>
+            <strong>
+              Interview format:
+            </strong>
           </p>
 
           <p className="text-sm text-blue-700 mt-1">
-            You will be asked 10 questions.
+            You will be asked{" "}
+            <strong>
+              {TOTAL_QUESTIONS}
+            </strong>{" "}
+            technical questions.
           </p>
+
+          <p className="text-sm text-blue-700 mt-1">
+            Each answer will be evaluated using
+            AI and semantic similarity analysis.
+          </p>
+
         </div>
 
         {/* =====================================
-            Start Button
+            START BUTTON
         ====================================== */}
->>>>>>> Stashed changes
         <button
           onClick={handleStart}
-          disabled={loading || rolesLoading || !selectedRole}
+          disabled={
+            loading ||
+            rolesLoading ||
+            !selectedRole
+          }
           className="w-full bg-blue-600 text-white font-bold py-4 rounded-xl hover:bg-blue-700 transition-all text-lg shadow-lg disabled:bg-gray-400"
         >
-          {loading || rolesLoading ? "Loading..." : "Start Mock Interview 🎤"}
+          {loading || rolesLoading
+            ? "Loading..."
+            : "Start Mock Interview 🎤"}
         </button>
+
       </div>
     </div>
   );
