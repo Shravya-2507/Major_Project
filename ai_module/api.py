@@ -14,14 +14,8 @@ from resume.project_analyzer import analyze_projects
 from resume.achievement_analyzer import analyze_achievements
 from resume.feedback_generator import generate_feedback
 
-<<<<<<< Updated upstream
-# =============================
-# AI MODULE IMPORTS
-# =============================
-=======
 from interview.question_generator import generate_question
 
->>>>>>> Stashed changes
 from answer_evaluation import evaluate_answer
 
 from topic_analysis import (
@@ -83,9 +77,6 @@ class ResumeRequest(BaseModel):
     role: str = "General"
     job_description: Optional[str] = None
 
-<<<<<<< Updated upstream
-# =============================
-=======
 
 class QuestionGenerationRequest(BaseModel):
     role: str
@@ -125,7 +116,6 @@ class FinalInterviewEvaluationRequest(BaseModel):
 
 
 # =========================================================
->>>>>>> Stashed changes
 # ROOT
 # =========================================================
 
@@ -537,16 +527,12 @@ def analyze(req: TopicAnalysisRequest):
                     "Mismatch in questions and answers"
             }
 
-<<<<<<< Updated upstream
-        questions = [q.model_dump() for q in req.questions]
-=======
         if not req.questions:
 
             return {
                 "error":
                     "No questions provided"
             }
->>>>>>> Stashed changes
 
         questions = [
             q.model_dump()
@@ -575,13 +561,6 @@ def analyze(req: TopicAnalysisRequest):
         )
 
         return {
-<<<<<<< Updated upstream
-            "topic_scores": topic_scores,
-            "topic_average": topic_avg,
-            "ranking": ranked,
-            "classification": classified,
-            "pagerank": pagerank_scores
-=======
 
             "topic_scores":
                 topic_scores,
@@ -607,7 +586,6 @@ def analyze(req: TopicAnalysisRequest):
             "pagerank":
                 pagerank_scores
 
->>>>>>> Stashed changes
         }
 
     except Exception as e:
@@ -752,8 +730,6 @@ async def analyze_resume(
             "message":
                 "Resume analysis failed."
 
-<<<<<<< Updated upstream
-=======
         }
 
 
@@ -918,5 +894,4 @@ def next_question(
             "message":
                 "Adaptive question generation failed"
 
->>>>>>> Stashed changes
         }
