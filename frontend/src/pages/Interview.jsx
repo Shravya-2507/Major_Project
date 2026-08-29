@@ -8,20 +8,8 @@ export default function Interview() {
   const location = useLocation();
   const navigate = useNavigate();
 
-<<<<<<< Updated upstream
   // Extract navigation state
   const { roleId, companyId } = location.state || {};
-=======
-  const {
-    roleId,
-    companyId,
-    role,
-    company,
-    topic,
-    question_type = "Technical",
-    category = "Conceptual",
-  } = location.state || {};
->>>>>>> Stashed changes
 
   // =========================================
   // Interview State
@@ -31,21 +19,10 @@ export default function Interview() {
   const [answers, setAnswers] = useState({});
   const [history, setHistory] = useState([]);
 
-<<<<<<< Updated upstream
   // Submission & Report State
-=======
-  const [loading, setLoading] = useState(true);
-  const [generatingNext, setGeneratingNext] = useState(false);
->>>>>>> Stashed changes
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [report, setReport] = useState(null);
 
-<<<<<<< Updated upstream
-=======
-  // =========================================
-  // Load First Question
-  // =========================================
->>>>>>> Stashed changes
   useEffect(() => {
     if (!roleId) {
       navigate("/mock-interview");
@@ -55,7 +32,6 @@ export default function Interview() {
     const loadFirstQuestion = async () => {
       try {
         setLoading(true);
-<<<<<<< Updated upstream
         const savedQuestions = sessionStorage.getItem("current_interview_questions");
         
         if (savedQuestions) {
@@ -67,142 +43,18 @@ export default function Interview() {
         }
       } catch (err) {
         console.error("Failed to load questions", err);
-=======
-
-        // Get interview information from navigation
-        let interviewRole = role;
-        let interviewCompany = company || "General";
-        let interviewTopic = topic;
-
-        // Fallback to sessionStorage
-        if (!interviewRole || !interviewTopic) {
-          const savedInterview =
-            sessionStorage.getItem("current_interview");
-
-          if (savedInterview) {
-            const parsedInterview =
-              JSON.parse(savedInterview);
-
-            interviewRole =
-              interviewRole ||
-              parsedInterview.role ||
-              parsedInterview.roleName;
-
-            interviewCompany =
-              parsedInterview.company ||
-              parsedInterview.companyName ||
-              "General";
-
-            interviewTopic =
-              interviewTopic ||
-              parsedInterview.topic;
-          }
-        }
-
-        if (!interviewRole) {
-          throw new Error("Role is missing.");
-        }
-
-        if (!interviewTopic) {
-          throw new Error("Topic is missing.");
-        }
-
-        // =====================================
-        // Get logged-in user
-        // =====================================
-        const savedUser =
-          localStorage.getItem("user");
-
-        const user = savedUser
-          ? JSON.parse(savedUser)
-          : null;
-
-        // =====================================
-        // IMPORTANT:
-        // Start with EMPTY history
-        // =====================================
-        const payload = {
-          role: interviewRole,
-          company: interviewCompany,
-          topic: interviewTopic,
-          question_type,
-          category,
-          history: [],
-          candidateId: user?.id || null,
-        };
-
-        console.log(
-          "========== GENERATING QUESTION 1 =========="
-        );
-        console.log(payload);
-
-        const data = await fetchQuestions(payload);
-
-        console.log(
-          "Question 1 response:",
-          data
-        );
-
-        const formattedQuestion = {
-          id: data.question_id,
-          question_text: data.question,
-          difficulty: data.difficulty,
-          topic: data.topic || interviewTopic,
-          role: data.role || interviewRole,
-          company:
-            data.company || interviewCompany,
-          category: data.category || category,
-          question_type:
-            data.question_type ||
-            question_type,
-        };
-
-        // Only Q1 initially
-        setQuestions([formattedQuestion]);
-
-        // Clear any old interview cache
-        sessionStorage.removeItem(
-          "current_interview_questions"
-        );
-      } catch (err) {
-        console.error(
-          "Failed to load first question:",
-          err
-        );
-
-        alert(
-          err.message ||
-            "Failed to load interview question."
-        );
->>>>>>> Stashed changes
       } finally {
         setLoading(false);
       }
     };
-<<<<<<< Updated upstream
     
     load();
   }, [roleId, companyId, navigate]);
-=======
-
-    loadFirstQuestion();
-  }, [
-    roleId,
-    companyId,
-    role,
-    company,
-    topic,
-    question_type,
-    category,
-    navigate,
-  ]);
->>>>>>> Stashed changes
 
   const handleInputChange = (e) => {
     setAnswers({ ...answers, [currentIndex]: e.target.value });
   };
 
-<<<<<<< Updated upstream
   const handleNext = () => {
     if (!answers[currentIndex] || answers[currentIndex].trim() === "") {
       return alert("Please provide an answer before moving to the next question.");
@@ -242,260 +94,6 @@ export default function Interview() {
     };
 
     const result = await submitAnswers(payload); 
-=======
-  // =========================================
-  // Generate NEXT Question
-  // =========================================
-  const handleNext = async () => {
-    const currentAnswer =
-      answers[currentIndex]?.trim();
-
-    if (!currentAnswer) {
-      alert(
-        "Please provide an answer before moving to the next question."
-      );
-      return;
-    }
-
-    const currentQuestion =
-      questions[currentIndex];
-
-    if (!currentQuestion) {
-      return;
-    }
-
-    try {
-      setGeneratingNext(true);
-
-      // =====================================
-      // Add current Q&A to history
-      // =====================================
-      const updatedHistory = [
-        ...history,
-        {
-          question:
-            currentQuestion.question_text,
-          answer: currentAnswer,
-        },
-      ];
-
-      console.log(
-        "========== GENERATING NEXT QUESTION =========="
-      );
-
-      console.log(
-        "Current Question:",
-        currentQuestion.question_text
-      );
-
-      console.log(
-        "Current Answer:",
-        currentAnswer
-      );
-
-      console.log(
-        "History:",
-        updatedHistory
-      );
-
-      // =====================================
-      // Get logged-in user
-      // =====================================
-      const savedUser =
-        localStorage.getItem("user");
-
-      const user = savedUser
-        ? JSON.parse(savedUser)
-        : null;
-
-      // =====================================
-      // Request NEXT question
-      // =====================================
-      const payload = {
-        role,
-        company: company || "General",
-        topic,
-        question_type,
-        category,
-        history: updatedHistory,
-        candidateId: user?.id || null,
-      };
-
-      const data =
-        await fetchQuestions(payload);
-
-      console.log(
-        "Next question response:",
-        data
-      );
-
-      if (
-        !data ||
-        !data.question ||
-        !data.question_id
-      ) {
-        throw new Error(
-          "AI did not return a valid next question."
-        );
-      }
-
-      // =====================================
-      // Format new question
-      // =====================================
-      const nextQuestion = {
-        id: data.question_id,
-        question_text: data.question,
-        difficulty: data.difficulty,
-        topic: data.topic || topic,
-        role: data.role || role,
-        company:
-          data.company || company || "General",
-        category:
-          data.category || category,
-        question_type:
-          data.question_type ||
-          question_type,
-      };
-
-      // =====================================
-      // Add new question to questions array
-      // =====================================
-      setQuestions((prev) => [
-        ...prev,
-        nextQuestion,
-      ]);
-
-      // Save history
-      setHistory(updatedHistory);
-
-      // Move to next question
-      setCurrentIndex(
-        (prev) => prev + 1
-      );
-    } catch (err) {
-      console.error(
-        "Failed to generate next question:",
-        err
-      );
-
-      alert(
-        err.message ||
-          "Failed to generate the next question."
-      );
-    } finally {
-      setGeneratingNext(false);
-    }
-  };
-
-  // =========================================
-  // Submit Entire Interview
-  // =========================================
-  const handleSubmit = async () => {
-    // Validate final answer
-    const finalAnswer =
-      answers[currentIndex]?.trim();
-
-    if (!finalAnswer) {
-      alert(
-        "Please provide an answer before submitting."
-      );
-      return;
-    }
-
-    try {
-      setIsSubmitting(true);
-
-      // =====================================
-      // Get logged-in user
-      // =====================================
-      const savedUser =
-        localStorage.getItem("user");
-
-      const user = savedUser
-        ? JSON.parse(savedUser)
-        : null;
-
-      if (!user || !user.id) {
-        alert(
-          "Session expired. Please log in again."
-        );
-
-        navigate("/login");
-        return;
-      }
-
-      // =====================================
-      // Build all answers
-      // =====================================
-      const payload = {
-        candidateId: user.id,
-        roleId,
-        companyId,
-
-        answers: questions.map(
-          (question, index) => ({
-            questionId: question.id,
-            answerText:
-              answers[index] || "",
-          })
-        ),
-      };
-
-      console.log(
-        "========== SUBMITTING COMPLETE INTERVIEW =========="
-      );
-
-      console.log(payload);
-
-      // =====================================
-      // Evaluate ALL questions
-      // =====================================
-      const result =
-        await submitAnswers(payload);
-
-      console.log(
-        "Final evaluation:",
-        result
-      );
-
-      // =====================================
-      // Clear interview data
-      // =====================================
-      sessionStorage.removeItem(
-        "current_interview_questions"
-      );
-
-      sessionStorage.removeItem(
-        "current_interview"
-      );
-
-      // =====================================
-      // Navigate to feedback
-      // =====================================
-      if (
-        result &&
-        (result.sessionId ||
-          result.session_id)
-      ) {
-        navigate("/feedback", {
-          state: {
-            candidateId: user.id,
-            sessionId:
-              result.sessionId ||
-              result.session_id,
-          },
-        });
-      } else {
-        throw new Error(
-          "No session ID returned from server."
-        );
-      }
-    } catch (err) {
-      console.error(
-        "Submission failed:",
-        err
-      );
->>>>>>> Stashed changes
 
     if (result && (result.sessionId || result.session_id)) {
       // Clear session storage so a new interview can start next time
@@ -511,76 +109,26 @@ export default function Interview() {
       throw new Error("No session ID returned from server");
     }
 
-<<<<<<< Updated upstream
   } catch (err) {
     console.error("Submission failed:", err);
     alert("Submission failed. Please try again.");
     setIsSubmitting(false); 
-=======
-  // =========================================
-  // Loading
-  // =========================================
-  if (loading) {
-    return (
-      <div className="p-10 text-center text-xl animate-pulse">
-        Generating your first question...
-      </div>
-    );
-  }
-
-  // =========================================
-  // Generating next question
-  // =========================================
-  if (generatingNext) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[400px] p-10 text-center">
-        <div className="w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mb-4"></div>
-
-        <h2 className="text-2xl font-bold text-gray-800">
-          AI is preparing your next question...
-        </h2>
-
-        <p className="text-gray-500 mt-2">
-          Your next question is being generated
-          based on your response.
-        </p>
-      </div>
-    );
->>>>>>> Stashed changes
   }
 };
   // UI STATE: Initial Question Loading
   if (loading) return <div className="p-10 text-center text-xl animate-pulse">Loading Questions...</div>;
 
-<<<<<<< Updated upstream
   // UI STATE: Analysis in Progress
-=======
-  // =========================================
-  // Submitting
-  // =========================================
->>>>>>> Stashed changes
   if (isSubmitting) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[400px] p-10 text-center">
         <div className="w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mb-4"></div>
-<<<<<<< Updated upstream
         <h2 className="text-2xl font-bold text-gray-800">Analyzing your responses...</h2>
         <p className="text-gray-500 mt-2">Our AI is grading your interview. Please don't close this page.</p>
-=======
-
-        <h2 className="text-2xl font-bold text-gray-800">
-          Analyzing your responses...
-        </h2>
-
-        <p className="text-gray-500 mt-2">
-          Our AI is grading your complete interview.
-        </p>
->>>>>>> Stashed changes
       </div>
     );
   }
 
-<<<<<<< Updated upstream
   // UI STATE: Display Final Report
   if (report) {
     return (
@@ -604,23 +152,6 @@ export default function Interview() {
         <button 
           onClick={() => navigate("/dashboard")}
           className="w-full mt-8 bg-blue-600 text-white py-4 rounded-xl font-bold hover:bg-blue-700 transition-all"
-=======
-  // =========================================
-  // No questions
-  // =========================================
-  if (questions.length === 0) {
-    return (
-      <div className="p-10 text-center">
-        <h2 className="text-xl font-bold">
-          No questions found.
-        </h2>
-
-        <button
-          onClick={() =>
-            navigate("/mock-interview")
-          }
-          className="mt-5 bg-blue-600 text-white px-6 py-3 rounded-lg"
->>>>>>> Stashed changes
         >
           Return to Dashboard
         </button>
@@ -628,7 +159,6 @@ export default function Interview() {
     );
   }
 
-<<<<<<< Updated upstream
   // UI STATE: No Questions Found
   if (questions.length === 0) return <div className="p-10 text-center">No questions found for this criteria.</div>;
 
@@ -643,61 +173,10 @@ export default function Interview() {
           className="bg-blue-600 h-2 rounded-full transition-all duration-300" 
           style={{ width: `${((currentIndex + 1) / questions.length) * 100}%` }}
         ></div>
-=======
-  // =========================================
-  // Current Question
-  // =========================================
-  const currentQuestion =
-    questions[currentIndex];
-
-  if (!currentQuestion) {
-    return null;
-  }
-
-  const isLastQuestion =
-    currentIndex ===
-    TOTAL_QUESTIONS - 1;
-
-  // =========================================
-  // Progress
-  // =========================================
-  const progress =
-    ((currentIndex + 1) /
-      TOTAL_QUESTIONS) *
-    100;
-
-  // =========================================
-  // UI
-  // =========================================
-  return (
-    <div className="p-10 max-w-2xl mx-auto shadow-xl rounded-2xl bg-white border mt-10">
-
-      {/* Progress Bar */}
-      <div className="w-full bg-gray-200 h-2 rounded-full mb-6">
-        <div
-          className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-          style={{
-            width: `${progress}%`,
-          }}
-        />
->>>>>>> Stashed changes
       </div>
 
       <div className="flex justify-between items-center mb-6">
-<<<<<<< Updated upstream
         <h2 className="text-xl font-bold text-blue-700">Question {currentIndex + 1} of {questions.length}</h2>
-=======
-        <h2 className="text-xl font-bold text-blue-700">
-          Question {currentIndex + 1} of{" "}
-          {TOTAL_QUESTIONS}
-        </h2>
-
-        {currentQuestion.difficulty && (
-          <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm font-semibold">
-            {currentQuestion.difficulty}
-          </span>
-        )}
->>>>>>> Stashed changes
       </div>
 
       <div className="mb-8">
