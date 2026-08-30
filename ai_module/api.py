@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from typing import List, Optional
 from fastapi.middleware.cors import CORSMiddleware
@@ -95,8 +95,11 @@ class AdaptiveQuestionRequest(BaseModel):
     role: str
     company: str = "General"
     question_type: str = "Technical"
+    category: str = "Conceptual"
+
     questions: List[Question]
     user_answers: List[str]
+
 
 
 # =========================================================
@@ -541,65 +544,63 @@ async def analyze_resume(
 def generate_interview_question(
     req: QuestionGenerationRequest
 ):
-
     try:
-
-        question = generate_question(
-
+        result = generate_question(
             role=req.role,
-
             company=req.company or "General",
-
             topic=req.topic,
-
-            history=req.history,
-
+            history=req.history or [],
             question_type=req.question_type,
-
             category=req.category
-
         )
 
+        # Return the generated question object directly.
+        # Do NOT wrap it inside another "question" property.
         return {
-
-            "question":
-                question,
-
-            "role":
-                req.role,
-
-            "company":
-                req.company or "General",
-
-            "topic":
-                req.topic,
-
-            "question_type":
-                req.question_type,
-
-            "category":
-                req.category
-
+            "question": result.get("question", ""),
+            "expected_answer": result.get(
+                "expected_answer",
+                ""
+            ),
+            "difficulty": result.get(
+                "difficulty",
+                "Medium"
+            ),
+            "topic": result.get(
+                "topic",
+                req.topic
+            ),
+            "company": result.get(
+                "company",
+                req.company or "General"
+            ),
+            "role": result.get(
+                "role",
+                req.role
+            ),
+            "question_type": req.question_type,
+            "category": req.category
         }
 
     except Exception as e:
-
         logging.error(
+            "Question generation failed:\n%s",
             traceback.format_exc()
         )
 
         return {
-
-            "error":
-                str(e)
-
+            "error": str(e)
         }
 
 
 # =========================================================
 # NEXT ADAPTIVE QUESTION
 # =========================================================
+# =========================================================
 
+# NEXT ADAPTIVE QUESTION
+
+# =========================================================
 @app.post("/next-question")
 def next_question(
     req: AdaptiveQuestionRequest
@@ -607,26 +608,41 @@ def next_question(
 
     try:
 
+        # -------------------------------------------------
+        # VALIDATION
+        # -------------------------------------------------
+
         if not req.questions:
 
-            return {
-                "error":
-                    "No previous questions provided"
-            }
+            raise HTTPException(
+                status_code=400,
+                detail="No previous questions provided"
+            )
 
         if len(req.questions) != len(
             req.user_answers
         ):
 
-            return {
-                "error":
-                    "Mismatch in questions and answers"
-            }
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Mismatch between questions "
+                    "and user_answers"
+                )
+            )
+
+        # -------------------------------------------------
+        # CONVERT QUESTIONS TO DICTS
+        # -------------------------------------------------
 
         questions = [
             q.model_dump()
             for q in req.questions
         ]
+
+        # -------------------------------------------------
+        # ANALYZE TOPIC PERFORMANCE
+        # -------------------------------------------------
 
         topic_scores = analyze_topics(
             questions,
@@ -639,32 +655,80 @@ def next_question(
 
         if not topic_avg:
 
-            return {
-                "error":
-                    "Unable to analyze topics"
-            }
+            raise HTTPException(
+                status_code=400,
+                detail="Unable to analyze topics"
+            )
+
+        # -------------------------------------------------
+        # PAGE RANK
+        # -------------------------------------------------
 
         pagerank = pagerank_topics(
             topic_avg
         )
+
+        # -------------------------------------------------
+        # FIND WEAKEST TOPIC
+        # -------------------------------------------------
 
         weakest_topic = min(
             topic_avg,
             key=topic_avg.get
         )
 
-        score = topic_avg[
+        weakest_score = topic_avg[
             weakest_topic
         ]
 
-        history = [
-            {
-                "score":
-                    score
-            }
-        ]
+        # -------------------------------------------------
+        # BUILD REAL INTERVIEW HISTORY
+        #
+        # This is important for adaptive difficulty.
+        # Do NOT send only {"score": score}.
+        # -------------------------------------------------
 
-        question = generate_question(
+        history = []
+
+        for index, question in enumerate(
+            questions
+        ):
+
+            answer = req.user_answers[index]
+
+            history.append({
+
+                "question":
+                    question.get(
+                        "question",
+                        ""
+                    ),
+
+                "answer":
+                    answer,
+
+                "topic":
+                    question.get(
+                        "topic",
+                        "General"
+                    ),
+
+                # Use topic score when available
+                "score":
+                    topic_avg.get(
+                        question.get(
+                            "topic",
+                            "General"
+                        ),
+                        weakest_score
+                    )
+            })
+
+        # -------------------------------------------------
+        # GENERATE NEXT QUESTION
+        # -------------------------------------------------
+
+        generated = generate_question(
 
             role=req.role,
 
@@ -674,43 +738,85 @@ def next_question(
 
             history=history,
 
-            question_type=req.question_type
+            question_type=req.question_type,
+
+            category=req.category
 
         )
 
+        # -------------------------------------------------
+        # RETURN FLAT RESPONSE
+        # -------------------------------------------------
+
         return {
 
-            "next_question":
-                question,
+            "question":
+                generated.get(
+                    "question",
+                    ""
+                ),
 
-            "topic":
-                weakest_topic,
+            "expected_answer":
+                generated.get(
+                    "expected_answer",
+                    ""
+                ),
 
             "difficulty":
-                question.get(
-                    "difficulty"
+                generated.get(
+                    "difficulty",
+                    "Medium"
                 ),
+
+            "topic":
+                generated.get(
+                    "topic",
+                    weakest_topic
+                ),
+
+            "company":
+                generated.get(
+                    "company",
+                    req.company or "General"
+                ),
+
+            "role":
+                generated.get(
+                    "role",
+                    req.role
+                ),
+
+            "question_type":
+                req.question_type,
+
+            "category":
+                req.category,
 
             "topic_scores":
                 topic_avg,
 
             "pagerank":
-                pagerank
+                pagerank,
+
+            "weakest_topic":
+                weakest_topic,
+
+            "weakest_score":
+                weakest_score
 
         }
+
+    except HTTPException:
+        raise
 
     except Exception as e:
 
         logging.error(
+            "Adaptive question generation failed:\n%s",
             traceback.format_exc()
         )
 
-        return {
-
-            "error":
-                str(e),
-
-            "message":
-                "Adaptive question generation failed"
-
-        }
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )

@@ -1,24 +1,50 @@
 import express from "express";
+
 import {
   generateQuestions,
+  generateNextQuestion,
   evaluateInterview,
   generateReport,
 } from "../controllers/interviewController.js";
-import { authenticate } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
-// ==============================
-// Interview Routes
-// ==============================
+// ===============================================
+// GENERATE FIRST INTERVIEW QUESTION
+// ===============================================
 
-// Generate Interview Questions
-router.post("/questions", generateQuestions);
+router.post(
+  "/questions",
+  generateQuestions
+);
 
-// Evaluate Candidate Answers
-router.post("/evaluate", evaluateInterview);
+// ===============================================
+// SUBMIT ANSWER + GET NEXT ADAPTIVE QUESTION
+// ===============================================
 
-// Generate Interview Analysis Report
-router.get("/analyze/:candidateId", generateReport);
+router.post(
+  "/next-question",
+  generateNextQuestion
+);
+
+// ===============================================
+// FINISH INTERVIEW
+// ===============================================
+
+router.post(
+  "/evaluate",
+  evaluateInterview
+);
+
+// ===============================================
+// GET INTERVIEW REPORT
+// ===============================================
+
+router.get(
+  "/analyze/:candidateId",
+  generateReport
+);
 
 export default router;
+
+console.log("✅ interviewRoutes loaded");

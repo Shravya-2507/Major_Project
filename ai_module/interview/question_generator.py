@@ -16,26 +16,36 @@ def generate_question(
     category="Conceptual"
 ):
     """
-    Generate a single interview question and an expected answer using:
+    Generate a single interview question and expected answer using:
     - RAG knowledge base
     - Company interview profile
     - Llama 3.1
     - Adaptive difficulty
     """
 
-    # -----------------------------
-    # Adaptive Difficulty
-    # -----------------------------
+    # =====================================================
+    # SAFE DEFAULTS
+    # =====================================================
 
-    difficulty = adjust_difficulty(
-        history or []
-    )
+    history = history or []
+
+    role = role or "General"
+    company = company or "General"
+    topic = topic or "General"
+    question_type = question_type or "Technical"
+    category = category or "Conceptual"
+
+    # =====================================================
+    # ADAPTIVE DIFFICULTY
+    # =====================================================
+
+    difficulty = adjust_difficulty(history)
 
     performance = history[-3:] if history else []
 
-    # -----------------------------
-    # Retrieve relevant context
-    # -----------------------------
+    # =====================================================
+    # RETRIEVE RELEVANT CONTEXT
+    # =====================================================
 
     context = retrieve_context(
         role=role,
@@ -49,9 +59,9 @@ def generate_question(
             "Use general interview knowledge."
         )
 
-    # -----------------------------
-    # Company Profile
-    # -----------------------------
+    # =====================================================
+    # COMPANY PROFILE
+    # =====================================================
 
     profile = COMPANY_STYLE.get(
         company.lower() if company else "",
@@ -86,14 +96,14 @@ def generate_question(
         "General technical interview."
     )
 
-    # -----------------------------
-    # Prompt
-    # -----------------------------
+    # =====================================================
+    # PROMPT
+    # =====================================================
 
     prompt = f"""
 You are an expert technical interviewer.
 
-Generate ONE interview question and its expected answer.
+Generate exactly ONE interview question and ONE expected answer.
 
 =====================================
 REFERENCE MATERIAL
@@ -103,16 +113,30 @@ REFERENCE MATERIAL
 
 =====================================
 
+CANDIDATE INFORMATION
+=====================================
+
 Candidate Role:
 {role}
 
 Target Company:
 {company}
 
-Current Difficulty Level:
+Current Difficulty:
 {difficulty}
 
-Difficulty Guidelines:
+Interview Topic:
+{topic}
+
+Question Type:
+{question_type}
+
+Question Category:
+{category}
+
+=====================================
+DIFFICULTY GUIDELINES
+=====================================
 
 Easy:
 - Basic definitions
@@ -129,22 +153,6 @@ Hard:
 - Architecture decisions
 - Advanced problem solving
 
-Interview Topic:
-{topic}
-
-Question Type:
-{question_type}
-
-Question Category:
-{category}
-
-Available Categories:
-- Conceptual
-- Coding
-- Debugging
-- System Design
-- Scenario Based
-
 =====================================
 COMPANY PROFILE
 =====================================
@@ -158,9 +166,6 @@ Interview Style:
 Main Focus:
 {focus}
 
-Previous Candidate Performance:
-{performance}
-
 Preferred Topics:
 {preferred_topics}
 
@@ -170,29 +175,12 @@ Coding Level:
 Behavioral Round:
 {behavioral}
 
+Previous Candidate Performance:
+{performance}
+
 =====================================
-INSTRUCTIONS
+ROLE GUIDELINES
 =====================================
-
-1. Generate exactly ONE interview question.
-
-2. Generate ONE technically correct expected answer
-   for that question.
-
-3. The expected answer should contain the important
-   concepts that a strong candidate should mention.
-
-4. The expected answer should be concise but complete.
-
-5. The question must match the requested difficulty.
-
-6. Prefer the reference material whenever relevant.
-
-7. Follow the company's interview style.
-
-8. Make the question role-specific.
-
-Examples:
 
 Software Developer:
 - DSA
@@ -226,27 +214,85 @@ Java Developer:
 - JVM
 - Multithreading
 
-9. Do not generate multiple questions.
+=====================================
+STRICT INSTRUCTIONS
+=====================================
 
-10. Return ONLY valid JSON.
+1. Generate exactly ONE interview question.
 
-Use exactly this format:
+2. Generate exactly ONE expected answer.
+
+3. The question must be specific to the candidate role.
+
+4. The question must match the requested difficulty.
+
+5. Prefer the reference material whenever relevant.
+
+6. Follow the company's interview style.
+
+7. The expected answer MUST be concise.
+
+8. The expected answer MUST contain 2-4 sentences maximum.
+
+9. The expected answer MUST be less than 80 words.
+
+10. The expected answer must contain only the important concepts
+    that a strong candidate should mention.
+
+11. Do NOT include code in expected_answer.
+
+12. Do NOT include markdown in expected_answer.
+
+13. Do NOT include bullet points in expected_answer.
+
+14. Do NOT create multiple questions.
+
+15. Do NOT create multiple answers.
+
+16. Do NOT add explanations outside the JSON.
+
+17. Do NOT add "Here is your question".
+
+18. Do NOT use markdown code fences.
+
+19. Return ONLY valid JSON.
+
+20. JSON string values MUST NOT contain literal line breaks.
+
+21. Escape quotation marks correctly inside JSON strings.
+
+22. Keep expected_answer under 80 words.
+
+=====================================
+OUTPUT FORMAT
+=====================================
+
+Return exactly this JSON structure:
 
 {{
-    "question": "interview question here",
-    "expected_answer": "technically correct expected answer here"
+    "question": "Short interview question",
+    "expected_answer": "Short technically correct answer in 2-4 sentences."
 }}
 """
 
-    # -----------------------------
-    # Call Llama
-    # -----------------------------
+    # =====================================================
+    # CALL LLAMA
+    # =====================================================
 
-    response = ask_llama(prompt)
+    try:
+        response = ask_llama(prompt)
 
-    # -----------------------------
-    # Fallback
-    # -----------------------------
+    except Exception as error:
+        print(
+            "Llama question generation error:",
+            error
+        )
+
+        response = None
+
+    # =====================================================
+    # FALLBACK
+    # =====================================================
 
     if not response:
         return {
@@ -255,8 +301,9 @@ Use exactly this format:
                 f"for a {role} interview."
             ),
             "expected_answer": (
-                f"Provide a technically correct explanation "
-                f"of the important concepts related to {topic}."
+                f"A strong answer should clearly explain "
+                f"the important concepts related to {topic} "
+                f"and their practical usage."
             ),
             "difficulty": difficulty,
             "topic": topic,
@@ -264,42 +311,73 @@ Use exactly this format:
             "role": role
         }
 
-    # -----------------------------
-    # Parse LLM JSON
-    # -----------------------------
+    # =====================================================
+    # PARSE LLM JSON
+    # =====================================================
+
+    question = ""
+    expected_answer = ""
 
     try:
         response = response.strip()
 
-        # Remove markdown code fences
+        print(
+            "========== RAW LLAMA QUESTION RESPONSE =========="
+        )
+        print(response)
+        print(
+            "=================================================="
+        )
+
+        # -------------------------------------------------
+        # REMOVE MARKDOWN CODE FENCES
+        # -------------------------------------------------
+
         response = re.sub(
-            r"```json\s*",
+            r"^```json\s*",
             "",
             response,
             flags=re.IGNORECASE
         )
 
         response = re.sub(
-            r"```\s*",
+            r"^```\s*",
             "",
             response
         )
 
-        # Find JSON object
-        match = re.search(
-            r"\{.*\}",
-            response,
-            re.DOTALL
+        response = re.sub(
+            r"\s*```$",
+            "",
+            response
         )
 
-        if not match:
+        response = response.strip()
+
+        # -------------------------------------------------
+        # FIND JSON OBJECT
+        # -------------------------------------------------
+
+        start = response.find("{")
+        end = response.rfind("}")
+
+        if start == -1 or end == -1 or end <= start:
             raise ValueError(
-                "No JSON object found in LLM response"
+                "No valid JSON object found in LLM response"
             )
 
-        data = json.loads(
-            match.group(0)
-        )
+        json_text = response[start:end + 1]
+
+        # -------------------------------------------------
+        # PARSE JSON
+        # -------------------------------------------------
+
+        data = json.loads(json_text)
+
+        if not isinstance(data, dict):
+            raise ValueError(
+                "LLM response is not a JSON object"
+            )
 
         question = str(
             data.get("question", "")
@@ -309,20 +387,22 @@ Use exactly this format:
             data.get("expected_answer", "")
         ).strip()
 
-        # -----------------------------
-        # Validate generated content
-        # -----------------------------
+        # -------------------------------------------------
+        # VALIDATE QUESTION
+        # -------------------------------------------------
 
         if not question:
-            question = (
-                f"Explain an important {topic} concept "
-                f"for a {role} interview."
+            raise ValueError(
+                "LLM returned an empty question"
             )
 
+        # -------------------------------------------------
+        # VALIDATE EXPECTED ANSWER
+        # -------------------------------------------------
+
         if not expected_answer:
-            expected_answer = (
-                f"Provide a technically correct explanation "
-                f"of the important concepts related to {topic}."
+            raise ValueError(
+                "LLM returned an empty expected answer"
             )
 
     except Exception as error:
@@ -337,41 +417,89 @@ Use exactly this format:
             response
         )
 
-        question = response.strip()
+        # -------------------------------------------------
+        # FALLBACK QUESTION
+        # -------------------------------------------------
+
+        question = (
+            f"Explain an important {topic} concept "
+            f"for a {role} interview."
+        )
 
         expected_answer = (
-            f"Provide a technically correct explanation "
-            f"of the important concepts related to {topic}."
+            f"A strong answer should clearly explain "
+            f"the important concepts related to {topic} "
+            f"and their practical usage."
         )
 
-    # -----------------------------
-    # Clean question
-    # -----------------------------
+    # =====================================================
+    # CLEAN QUESTION
+    # =====================================================
 
-    for prefix in [
+    prefixes = [
         "Here is your question:",
+        "Here is the interview question:",
         "Question:",
-        "Interview Question:"
-    ]:
-        question = question.replace(
-            prefix,
-            ""
+        "Interview Question:",
+    ]
+
+    for prefix in prefixes:
+        if question.lower().startswith(
+            prefix.lower()
+        ):
+            question = question[
+                len(prefix):
+            ].strip()
+
+    # Remove accidental numbering
+    question = re.sub(
+        r"^\s*\d+[\.\)\-:]\s*",
+        "",
+        question
+    ).strip()
+
+    # Remove accidental newlines from question
+    question = " ".join(
+        question.split()
+    ).strip()
+
+    # =====================================================
+    # CLEAN EXPECTED ANSWER
+    # =====================================================
+
+    expected_answer = " ".join(
+        expected_answer.split()
+    ).strip()
+
+    # Remove accidental markdown
+    expected_answer = re.sub(
+        r"```.*?```",
+        "",
+        expected_answer,
+        flags=re.DOTALL
+    ).strip()
+
+    # =====================================================
+    # SAFETY LIMIT
+    # =====================================================
+
+    words = expected_answer.split()
+
+    if len(words) > 80:
+        expected_answer = " ".join(
+            words[:80]
+        ).rstrip(".,;:") + "."
+
+        print(
+            "Expected answer exceeded 80 words. "
+            "Trimmed automatically."
         )
 
-    question = question.strip()
+    # =====================================================
+    # FINAL RESPONSE
+    # =====================================================
 
-    question = (
-        question
-        .split("\n")[0]
-        .lstrip("0123456789.- ")
-        .strip()
-    )
-
-    # -----------------------------
-    # Return
-    # -----------------------------
-
-    return {
+    result = {
         "question": question,
         "expected_answer": expected_answer,
         "difficulty": difficulty,
@@ -380,3 +508,20 @@ Use exactly this format:
         "role": role
     }
 
+    print(
+        "========== FINAL GENERATED QUESTION =========="
+    )
+
+    print(
+        json.dumps(
+            result,
+            indent=2,
+            ensure_ascii=False
+        )
+    )
+
+    print(
+        "==============================================="
+    )
+
+    return result

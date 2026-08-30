@@ -1,147 +1,462 @@
 import pool from "../config/db.js";
-import { evaluateAnswer } from "../services/evaluationService.js";
+import {
+  evaluateAnswer,
+} from "../services/evaluationService.js";
+
 
 // ==============================
-// Helper: Parse Filters (GET + POST support)
+// Helper: Parse Filters
 // ==============================
+
 const parseFilters = (req) => {
-  const source = req.method === "POST" ? req.body : req.query;
 
-  const roleId = source.role_id ? Number(source.role_id) : null;
-  const companyId = source.company_id ? Number(source.company_id) : null;
+  const source =
+    req.method === "POST"
+      ? req.body
+      : req.query;
 
-  const syllabusIds = source.syllabus_ids
-    ? Array.isArray(source.syllabus_ids)
-      ? source.syllabus_ids.map(Number)
-      : String(source.syllabus_ids).split(",").map(Number)
-    : null;
 
-  const limit = source.limit ? Number(source.limit) : 5;
+  const roleId =
+    source.role_id
+      ? Number(source.role_id)
+      : null;
 
-  return { roleId, companyId, syllabusIds, limit };
+
+  const companyId =
+    source.company_id
+      ? Number(source.company_id)
+      : null;
+
+
+  const syllabusIds =
+    source.syllabus_ids
+
+      ? Array.isArray(
+          source.syllabus_ids
+        )
+
+        ? source.syllabus_ids.map(
+            Number
+          )
+
+        : String(
+            source.syllabus_ids
+          )
+            .split(",")
+            .map(Number)
+
+      : null;
+
+
+  const limit =
+    source.limit
+      ? Number(source.limit)
+      : 5;
+
+
+  return {
+
+    roleId,
+
+    companyId,
+
+    syllabusIds,
+
+    limit,
+
+  };
+
 };
 
-// ==============================
-// 1. Get Questions
-// ==============================
-export const getQuestions = async (req, res) => {
-  try {
-    const { roleId, companyId, syllabusIds, limit } = parseFilters(req);
 
-    // Require at least one meaningful filter
-    if (!roleId && (!syllabusIds || syllabusIds.length === 0)) {
+// ==============================
+// Get Questions
+// ==============================
+
+export const getQuestions = async (
+  req,
+  res
+) => {
+
+  try {
+
+    const {
+
+      roleId,
+
+      companyId,
+
+      syllabusIds,
+
+      limit,
+
+    } = parseFilters(req);
+
+
+    if (
+      !roleId &&
+      (
+        !syllabusIds ||
+        syllabusIds.length === 0
+      )
+    ) {
+
       return res.status(400).json({
-        error: "Search criteria missing",
-        detail: "Provide at least role_id or syllabus_ids",
+
+        error:
+          "Search criteria missing",
+
+        detail:
+          "Provide at least role_id or syllabus_ids",
+
       });
+
     }
 
+
     let query = `
-      SELECT id, question_text, syllabus_id
+      SELECT
+        id,
+        question_text,
+        syllabus_id,
+        difficulty_level,
+        question_type,
+        category
       FROM questions
       WHERE 1=1
     `;
 
+
     const values = [];
+
     let counter = 1;
 
-    // Role filter
+
     if (roleId) {
-      query += ` AND role_id = $${counter++}`;
-      values.push(roleId);
+
+      query += `
+        AND role_id = $${counter++}
+      `;
+
+      values.push(
+        roleId
+      );
+
     }
 
-    // Company filter (specific + generic)
+
     if (companyId) {
-      query += ` AND (company_id = $${counter++} OR company_id IS NULL)`;
-      values.push(companyId);
+
+      query += `
+        AND
+        (
+          company_id = $${counter++}
+          OR company_id IS NULL
+        )
+      `;
+
+      values.push(
+        companyId
+      );
+
     }
 
-    // Syllabus filter
-    if (syllabusIds?.length) {
-      query += ` AND syllabus_id = ANY($${counter++}::int[])`;
-      values.push(syllabusIds);
+
+    if (
+      syllabusIds?.length
+    ) {
+
+      query += `
+        AND syllabus_id =
+        ANY($${counter++}::int[])
+      `;
+
+      values.push(
+        syllabusIds
+      );
+
     }
 
-    // Random questions + limit
-    query += ` ORDER BY RANDOM() LIMIT $${counter}`;
-    values.push(limit);
 
-    const result = await pool.query(query, values);
+    query += `
+      ORDER BY RANDOM()
+      LIMIT $${counter}
+    `;
 
-    if (result.rows.length === 0) {
+
+    values.push(
+      limit
+    );
+
+
+    const result =
+      await pool.query(
+        query,
+        values
+      );
+
+
+    if (
+      result.rows.length === 0
+    ) {
+
       return res.status(404).json({
-        message: "No questions found for given filters",
+
+        message:
+          "No questions found",
+
       });
+
     }
 
-    res.json(result.rows);
 
-  } catch (err) {
-    console.error("Error fetching questions:", err);
-    res.status(500).json({ error: "Internal Server Error" });
+    return res.json(
+      result.rows
+    );
+
+
+  } catch (error) {
+
+    console.error(
+      "Get Questions Error:",
+      error
+    );
+
+
+    return res.status(500).json({
+
+      error:
+        "Internal Server Error",
+
+    });
+
   }
+
 };
 
-// ==============================
-// 2. Evaluate Answers
-// ==============================
-export const evaluateAnswers = async (req, res) => {
-  try {
-    const { candidateId, answers } = req.body;
 
-    if (!candidateId || !answers?.length) {
+// ==============================
+// Evaluate Answers
+// ==============================
+
+export const evaluateAnswers = async (
+  req,
+  res
+) => {
+
+  try {
+
+    const {
+      candidateId,
+      answers,
+    } = req.body;
+
+
+    if (
+      !candidateId ||
+      !answers?.length
+    ) {
+
       return res.status(400).json({
-        error: "candidateId and answers are required",
+
+        error:
+          "candidateId and answers are required",
+
       });
+
     }
+
 
     const results = [];
 
-    for (const ans of answers) {
-      // Fetch question details
-      const dbRes = await pool.query(
-        `SELECT role_id, company_id, expected_answer 
-         FROM questions WHERE id = $1`,
-        [ans.questionId]
-      );
 
-      const question = dbRes.rows[0];
-      if (!question) continue;
+    for (
+      const ans of answers
+    ) {
 
-      // AI Evaluation
-      const { score, feedback } = await evaluateAnswer(
-        ans.answerText,
-        question.expected_answer || ""
-      );
+      const dbRes =
+        await pool.query(
 
-      // Store answer
-      await pool.query(
-        `INSERT INTO answers
-        (candidate_id, question_id, role_id, company_id, answer_text, ai_score, ai_feedback)
-        VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-        [
-          candidateId,
-          ans.questionId,
-          question.role_id,
-          question.company_id,
+          `
+          SELECT
+
+            q.role_id,
+
+            q.company_id,
+
+            q.expected_answer,
+
+            q.difficulty_level,
+
+            q.category,
+
+            q.syllabus_id,
+
+            r.role_name,
+
+            c.company_name
+
+          FROM questions q
+
+          LEFT JOIN roles r
+            ON r.id = q.role_id
+
+          LEFT JOIN companies c
+            ON c.id = q.company_id
+
+          WHERE q.id = $1
+          `,
+
+          [
+            ans.questionId
+          ]
+
+        );
+
+
+      if (
+        dbRes.rows.length === 0
+      ) {
+
+        continue;
+
+      }
+
+
+      const question =
+        dbRes.rows[0];
+
+
+      // =========================================
+      // Evaluate using role/company NAMES
+      // =========================================
+
+      const evaluation =
+        await evaluateAnswer(
+
           ans.answerText,
-          score,
-          feedback,
+
+          question.expected_answer ||
+            "",
+
+          question.role_name ||
+            "General",
+
+          question.company_name ||
+            "General"
+
+        );
+
+
+      await pool.query(
+
+        `
+        INSERT INTO answers
+        (
+          candidate_id,
+          question_id,
+          role_id,
+          company_id,
+          answer_text,
+          ai_score,
+          ai_feedback,
+          semantic_score,
+          keyword_match_score,
+          difficulty,
+          topic,
+          category
+        )
+        VALUES
+        (
+          $1,$2,$3,$4,$5,$6,
+          $7,$8,$9,$10,$11,$12
+        )
+        `,
+
+        [
+
+          candidateId,
+
+          ans.questionId,
+
+          question.role_id,
+
+          question.company_id,
+
+          ans.answerText,
+
+          evaluation.final_score,
+
+          evaluation.feedback,
+
+          evaluation.semantic_score,
+
+          evaluation.keyword_match_score,
+
+          question.difficulty_level,
+
+          question.syllabus_id,
+
+          question.category,
+
         ]
+
       );
+
 
       results.push({
-        questionId: ans.questionId,
-        ai_score: score,
-        ai_feedback: feedback,
+
+        questionId:
+          ans.questionId,
+
+        ai_score:
+          evaluation.final_score,
+
+        semantic_score:
+          evaluation.semantic_score,
+
+        keyword_match_score:
+          evaluation.keyword_match_score,
+
+        feedback:
+          evaluation.feedback,
+
+        evaluation_method:
+          evaluation.evaluation_method,
+
       });
+
     }
 
-    res.json(results);
 
-  } catch (err) {
-    console.error("Error evaluating answers:", err);
-    res.status(500).json({ error: "Evaluation failed" });
+    return res.json({
+
+      success: true,
+
+      results,
+
+    });
+
+
+  } catch (error) {
+
+    console.error(
+      "Evaluation Error:",
+      error
+    );
+
+
+    return res.status(500).json({
+
+      error:
+        "Evaluation failed",
+
+      details:
+        error.message,
+
+    });
+
   }
+
 };
+

@@ -88,8 +88,7 @@ def generate_interview_report(
 
         # =====================================================
         # PREPARE INTERVIEW DATA
-        # =====================================================
-
+        # ====================================================
         interview_data = []
 
         for index, evaluation in enumerate(evaluations):
@@ -97,141 +96,79 @@ def generate_interview_report(
             question = ""
 
             if index < len(questions):
-
-                question = questions[index].get(
-                    "question",
-                    ""
-                )
+                question = questions[index].get("question", "")
 
             interview_data.append({
-
-                "question_number":
-                    index + 1,
-
-                "question":
-                    question,
-
-                "student_answer":
-                    evaluation.get(
-                        "student_answer",
-                        ""
-                    ),
-
-                "llm_score":
-                    evaluation.get(
-                        "llm_score",
-                        0
-                    ),
-
-                "smith_waterman_score":
-                    evaluation.get(
-                        "smith_waterman_score",
-                        0
-                    ),
-
-                "final_score":
-                    evaluation.get(
-                        "final_score",
-                        0
-                    )
+                "question": question,
+                "student_answer": evaluation.get(
+                    "student_answer",
+                    ""
+                ),
+                "llm_score": evaluation.get(
+                    "llm_score",
+                    0
+                ),
+                "smith_waterman_score": evaluation.get(
+                    "smith_waterman_score",
+                    0
+                ),
+                "final_score": evaluation.get(
+                    "final_score",
+                    0
+                )
             })
+
+
 
         # =====================================================
         # FINAL LLM FEEDBACK
         # =====================================================
 
+
         prompt = f"""
-You are an expert technical interview evaluator.
+        You are an expert technical interview evaluator.
 
-Generate ONE detailed FINAL interview feedback report
-for the candidate after the complete interview.
+        Create ONE final interview report based ONLY on the
+        provided interview data and already-calculated scores.
 
-Do NOT evaluate or score individual answers again.
+        Role: {role}
+        Company: {company}
+        Total Questions: {len(evaluations)}
+        Overall Score: {overall_score}/100
 
-The individual scores have already been calculated.
+        Interview data:
+        {json.dumps(interview_data, separators=(",", ":"))}
 
-==================================================
-INTERVIEW INFORMATION
-==================================================
+        Analyze the candidate's overall:
+        - technical knowledge
+        - strengths
+        - weaknesses
+        - answer quality
+        - interview readiness
+        - areas needing improvement
+        - practical recommendations
+        - final assessment
 
-Role:
-{role}
+        Rules:
+        - Do NOT score or re-evaluate individual answers.
+        - Use the provided scores exactly as given.
+        - Do NOT give question-by-question feedback.
+        - Do NOT invent skills or weaknesses.
+        - Base everything only on the supplied questions, answers and scores.
+        - Keep the report concise but useful.
+        - Return ONLY valid JSON.
 
-Company:
-{company}
+        Return exactly:
+        {{
+            "summary": "Overall performance analysis",
+            "strengths": ["strength 1", "strength 2"],
+            "weaknesses": ["weakness 1", "weakness 2"],
+            "recommendations": ["recommendation 1", "recommendation 2"],
+            "final_assessment": "Final interview assessment"
+        }}
+        """
 
-Total Questions:
-{len(evaluations)}
 
-Overall Score:
-{overall_score}/100
-
-==================================================
-INTERVIEW DATA
-==================================================
-
-{json.dumps(interview_data, indent=2)}
-
-==================================================
-TASK
-==================================================
-
-Analyze the candidate's overall performance across the
-complete interview.
-
-Generate ONE combined report covering:
-
-1. Overall performance
-2. Technical knowledge
-3. Strong areas
-4. Weak areas
-5. Concepts that need improvement
-6. Answer quality
-7. Interview readiness
-8. Specific recommendations
-9. Final assessment
-
-==================================================
-IMPORTANT RULES
-==================================================
-
-- This is FINAL interview feedback.
-- Do NOT give feedback for each individual question.
-- Do NOT create question-by-question explanations.
-- Do NOT calculate new scores.
-- Use the provided scores as they are.
-- Base the report ONLY on the provided questions,
-  answers and scores.
-- Do not invent skills or weaknesses.
-- Do not assume a concept is missing without evidence.
-- Consider the LLM score, Smith-Waterman score and
-  final score when forming the overall assessment.
-- Explain the overall performance clearly.
-- Recommendations must be practical and specific.
-- Keep the report detailed but easy for a student
-  to understand.
-
-Return ONLY valid JSON.
-
-Use exactly this structure:
-
-{{
-    "summary": "Detailed overall performance analysis",
-    "strengths": [
-        "strength 1",
-        "strength 2"
-    ],
-    "weaknesses": [
-        "weakness 1",
-        "weakness 2"
-    ],
-    "recommendations": [
-        "recommendation 1",
-        "recommendation 2"
-    ],
-    "final_assessment": "Final interview assessment"
-}}
-"""
 
         llm_response = ask_llama(prompt)
 

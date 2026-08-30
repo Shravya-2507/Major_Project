@@ -19,7 +19,7 @@ export default function MockInterview() {
   const navigate = useNavigate();
 
   // =========================================
-  // State
+  // STATE
   // =========================================
   const [roles, setRoles] = useState([]);
   const [companies, setCompanies] = useState([]);
@@ -46,15 +46,9 @@ export default function MockInterview() {
             ? companiesData
             : []
         );
-
       } catch (err) {
-        console.error(
-          "Error fetching companies:",
-          err
-        );
-
+        console.error("Error fetching companies:", err);
         setCompanies([]);
-
       } finally {
         setLoading(false);
       }
@@ -68,37 +62,40 @@ export default function MockInterview() {
   // =========================================
   useEffect(() => {
     const updateRoles = async () => {
+      // No company selected
+      if (!selectedCompany) {
+        setRoles([]);
+        setSelectedRole("");
+        setRolesLoading(false);
+        return;
+      }
+
       try {
         setRolesLoading(true);
 
-        const rolesData =
-          await fetchRoles(selectedCompany);
+        const rolesData = await fetchRoles(
+          selectedCompany
+        );
 
-        const validRoles =
-          Array.isArray(rolesData)
-            ? rolesData
-            : [];
+        const validRoles = Array.isArray(rolesData)
+          ? rolesData
+          : [];
 
         setRoles(validRoles);
 
         // Automatically select first role
         if (validRoles.length > 0) {
           setSelectedRole(
-            validRoles[0].id
+            String(validRoles[0].id)
           );
         } else {
           setSelectedRole("");
         }
-
       } catch (err) {
-        console.error(
-          "Error fetching roles:",
-          err
-        );
+        console.error("Error fetching roles:", err);
 
         setRoles([]);
         setSelectedRole("");
-
       } finally {
         setRolesLoading(false);
       }
@@ -111,7 +108,6 @@ export default function MockInterview() {
   // START INTERVIEW
   // =========================================
   const handleStart = () => {
-
     // -----------------------------------------
     // Validate role
     // -----------------------------------------
@@ -123,29 +119,24 @@ export default function MockInterview() {
     // -----------------------------------------
     // Find selected role
     // -----------------------------------------
-    const selectedRoleObject =
-      roles.find(
-        (role) =>
-          String(role.id) ===
-          String(selectedRole)
-      );
+    const selectedRoleObject = roles.find(
+      (role) =>
+        String(role.id) === String(selectedRole)
+    );
 
     if (!selectedRoleObject) {
-      alert(
-        "Unable to find the selected role."
-      );
+      alert("Unable to find the selected role.");
       return;
     }
 
     // -----------------------------------------
     // Find selected company
     // -----------------------------------------
-    const selectedCompanyObject =
-      companies.find(
-        (company) =>
-          String(company.id) ===
-          String(selectedCompany)
-      );
+    const selectedCompanyObject = companies.find(
+      (company) =>
+        String(company.id) ===
+        String(selectedCompany)
+    );
 
     // -----------------------------------------
     // Get names
@@ -167,11 +158,17 @@ export default function MockInterview() {
       ? JSON.parse(savedUser)
       : null;
 
+    if (!user || !user.id) {
+      alert("Please log in before starting the interview.");
+      navigate("/login");
+      return;
+    }
+
     // -----------------------------------------
     // Interview information
     // -----------------------------------------
     const interviewInfo = {
-      candidateId: user?.id || null,
+      candidateId: user.id,
 
       roleId: Number(selectedRole),
 
@@ -256,11 +253,10 @@ export default function MockInterview() {
           <select
             className="w-full border-2 p-3 rounded-lg focus:border-blue-500 outline-none disabled:bg-gray-100"
             value={selectedCompany}
-            onChange={(e) =>
-              setSelectedCompany(
-                e.target.value
-              )
-            }
+            onChange={(e) => {
+              setSelectedCompany(e.target.value);
+              setSelectedRole("");
+            }}
             disabled={loading}
           >
             <option value="">
@@ -290,18 +286,20 @@ export default function MockInterview() {
             className="w-full border-2 p-3 rounded-lg focus:border-blue-500 outline-none disabled:bg-gray-100"
             value={selectedRole}
             onChange={(e) =>
-              setSelectedRole(
-                e.target.value
-              )
+              setSelectedRole(e.target.value)
             }
             disabled={
               loading ||
-              rolesLoading
+              rolesLoading ||
+              !selectedCompany
             }
           >
-
-            {rolesLoading ? (
-              <option>
+            {!selectedCompany ? (
+              <option value="">
+                Select a company first
+              </option>
+            ) : rolesLoading ? (
+              <option value="">
                 Updating roles...
               </option>
             ) : roles.length === 0 ? (
@@ -318,7 +316,6 @@ export default function MockInterview() {
                 </option>
               ))
             )}
-
           </select>
         </div>
 
@@ -334,16 +331,13 @@ export default function MockInterview() {
             className="w-full border-2 p-3 rounded-lg focus:border-blue-500 outline-none"
             value={selectedTopic}
             onChange={(e) =>
-              setSelectedTopic(
-                e.target.value
-              )
+              setSelectedTopic(e.target.value)
             }
             disabled={
               loading ||
               rolesLoading
             }
           >
-
             {TOPICS.map((topic) => (
               <option
                 key={topic}
@@ -352,7 +346,6 @@ export default function MockInterview() {
                 {topic}
               </option>
             ))}
-
           </select>
         </div>
 
@@ -372,13 +365,9 @@ export default function MockInterview() {
             <strong>
               {TOTAL_QUESTIONS}
             </strong>{" "}
-            technical questions.
+             questions.
           </p>
 
-          <p className="text-sm text-blue-700 mt-1">
-            Each answer will be evaluated using
-            AI and semantic similarity analysis.
-          </p>
 
         </div>
 
@@ -392,11 +381,11 @@ export default function MockInterview() {
             rolesLoading ||
             !selectedRole
           }
-          className="w-full bg-blue-600 text-white font-bold py-4 rounded-xl hover:bg-blue-700 transition-all text-lg shadow-lg disabled:bg-gray-400"
+          className="w-full bg-blue-600 text-white font-bold py-4 rounded-xl hover:bg-blue-700 transition-all text-lg shadow-lg disabled:bg-gray-400 disabled:cursor-not-allowed"
         >
           {loading || rolesLoading
             ? "Loading..."
-            : "Start Mock Interview 🎤"}
+            : "Start Mock Interview"}
         </button>
 
       </div>

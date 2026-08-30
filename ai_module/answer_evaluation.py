@@ -15,121 +15,29 @@ def llm_evaluate_answer(
     role="General",
     company="General"
 ):
-    """
-    Evaluate one interview answer using Llama.
-
-    The LLM returns:
-    - score
-    - ideal_answer
-
-    Individual feedback is NOT generated here.
-    Detailed feedback is generated only by interview_feedback.py
-    after the complete interview is submitted.
-    """
-
     prompt = f"""
-You are an expert technical interviewer.
+Evaluate this interview answer.
 
-Evaluate the candidate's answer to the interview question.
-
-========================================
-INTERVIEW CONTEXT
-========================================
-
-Role:
-{role}
-
-Company:
-{company}
-
-========================================
-QUESTION
-========================================
-
+Question:
 {question}
 
-========================================
-CANDIDATE ANSWER
-========================================
-
+Candidate answer:
 {answer}
 
-========================================
-EVALUATION CRITERIA
-========================================
+Give a score from 0 to 100 based on:
+- correctness
+- technical understanding
+- relevance
+- completeness
 
-Evaluate ONLY:
+Then provide a short ideal answer.
 
-1. Technical correctness
-2. Concept understanding
-3. Important concept coverage
-4. Relevance
-5. Completeness
-6. Technical accuracy
-7. Quality of explanation
-
-Do NOT give credit simply because the candidate
-uses words similar to the question.
-
-The candidate must demonstrate actual understanding.
-
-========================================
-SCORING
-========================================
-
-90-100:
-Excellent answer.
-Correct, complete and technically strong.
-
-75-89:
-Good answer.
-Mostly correct with minor omissions.
-
-60-74:
-Partially correct.
-Shows understanding but misses important concepts.
-
-40-59:
-Weak answer.
-Some relevant knowledge but significant gaps.
-
-0-39:
-Incorrect or irrelevant answer.
-
-========================================
-IDEAL ANSWER
-========================================
-
-Generate a concise expert/reference answer.
-
-The ideal answer must be based ONLY on:
-
-- The interview question
-- Candidate role
-- Target company
-- General technical knowledge
-
-Do NOT use the candidate answer to construct
-the ideal answer.
-
-Do NOT copy, paraphrase, or adapt the candidate answer.
-
-========================================
-IMPORTANT
-========================================
-
-Return ONLY valid JSON.
-
-Use exactly this format:
-
+Return ONLY JSON:
 {{
-    "score": 0,
-    "ideal_answer": "concise technically correct ideal answer"
+  "score": 0,
+  "ideal_answer": "short correct answer"
 }}
-
-The score MUST be a number between 0 and 100.
 """
-
 
     response = ask_llama(prompt)
 
@@ -139,30 +47,16 @@ The score MUST be a number between 0 and 100.
             "ideal_answer": ""
         }
 
-
-    # ========================================================
-    # SAFE JSON PARSING
-    # ========================================================
-
     try:
-
         response = response.strip()
 
-        # Remove markdown code fences
         response = re.sub(
-            r"```json\s*",
+            r"```json\s*|\s*```",
             "",
             response,
             flags=re.IGNORECASE
         )
 
-        response = re.sub(
-            r"```\s*",
-            "",
-            response
-        )
-
-        # Find JSON object
         match = re.search(
             r"\{.*\}",
             response,
@@ -174,35 +68,17 @@ The score MUST be a number between 0 and 100.
 
         data = json.loads(response)
 
-        score = float(
-            data.get("score", 0)
-        )
-
-        score = max(
-            0,
-            min(score, 100)
-        )
+        score = float(data.get("score", 0))
 
         return {
-            "score": score,
-            "ideal_answer": data.get(
-                "ideal_answer",
-                ""
+            "score": max(0, min(score, 100)),
+            "ideal_answer": str(
+                data.get("ideal_answer", "")
             )
         }
 
-
     except Exception as error:
-
-        print(
-            "LLM JSON parsing error:",
-            error
-        )
-
-        print(
-            "Raw LLM response:",
-            response
-        )
+        print("LLM JSON parsing error:", error)
 
         return {
             "score": 0,
