@@ -4,7 +4,8 @@ import { useLocation, useNavigate } from "react-router-dom";
 import {
   fetchQuestions,
   getNextQuestion,
-  submitAnswers,
+  evaluateInterviewAnswer,
+  evaluateInterview,
 } from "../services/api";
 
 const TOTAL_QUESTIONS = 5;
@@ -39,39 +40,21 @@ export default function Interview() {
   // STATE
   // =====================================================
 
-  const [questions, setQuestions] =
-    useState([]);
-
-  const [currentIndex, setCurrentIndex] =
-    useState(0);
-
-  const [answers, setAnswers] =
-    useState({});
-
-  const [evaluatedAnswers, setEvaluatedAnswers] =
-    useState([]);
-
-  const [history, setHistory] =
-    useState([]);
-
-  const [sessionId, setSessionId] =
-    useState(null);
+  const [questions, setQuestions] = useState([]);
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [answers, setAnswers] = useState({});
+  const [evaluatedAnswers, setEvaluatedAnswers] = useState([]);
+  const [history, setHistory] = useState([]);
+  const [sessionId, setSessionId] = useState(null);
 
   // =====================================================
   // UI STATE
   // =====================================================
 
-  const [loading, setLoading] =
-    useState(true);
-
-  const [isEvaluating, setIsEvaluating] =
-    useState(false);
-
-  const [isSubmitting, setIsSubmitting] =
-    useState(false);
-
-  const [errorMessage, setErrorMessage] =
-    useState("");
+  const [loading, setLoading] = useState(true);
+  const [isEvaluating, setIsEvaluating] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
 
   // =====================================================
   // GET CURRENT USER
@@ -79,8 +62,7 @@ export default function Interview() {
 
   const getCurrentUser = () => {
     try {
-      const savedUser =
-        localStorage.getItem("user");
+      const savedUser = localStorage.getItem("user");
 
       return savedUser
         ? JSON.parse(savedUser)
@@ -192,9 +174,7 @@ export default function Interview() {
             ) {
               setQuestions(parsedQuestions);
 
-              setSessionId(
-                savedSessionId
-              );
+              setSessionId(savedSessionId);
 
               if (savedAnswers) {
                 setAnswers(
@@ -204,28 +184,15 @@ export default function Interview() {
 
               if (savedEvaluations) {
                 setEvaluatedAnswers(
-                  JSON.parse(
-                    savedEvaluations
-                  )
+                  JSON.parse(savedEvaluations)
                 );
               }
 
               if (savedHistory) {
                 setHistory(
-                  JSON.parse(
-                    savedHistory
-                  )
+                  JSON.parse(savedHistory)
                 );
               }
-
-              /*
-                Important:
-
-                If the last question is unanswered,
-                go to that question.
-
-                Otherwise restore the next position.
-              */
 
               const parsedAnswers =
                 savedAnswers
@@ -281,11 +248,16 @@ export default function Interview() {
         // USER
         // =================================================
 
-        const user =
-          getCurrentUser();
+        const user = getCurrentUser();
 
         const candidateId =
           user?.id || null;
+
+        if (!candidateId) {
+          throw new Error(
+            "User not found. Please login again."
+          );
+        }
 
         // =================================================
         // START TIME
@@ -312,16 +284,14 @@ export default function Interview() {
 
         const data =
           await fetchQuestions({
-            roleId:
-              Number(roleId),
+            roleId: Number(roleId),
 
             companyId:
               companyId
                 ? Number(companyId)
                 : null,
 
-            topic:
-              requestTopic,
+            topic: requestTopic,
 
             question_type:
               requestQuestionType,
@@ -352,6 +322,22 @@ export default function Interview() {
         const firstQuestion =
           data.question;
 
+        // IMPORTANT:
+        // First question MUST contain DB ID
+        console.log(
+          "FIRST QUESTION OBJECT:",
+          firstQuestion
+        );
+
+        if (
+          !firstQuestion.id &&
+          !firstQuestion.question_id
+        ) {
+          throw new Error(
+            "First question was returned without a database ID."
+          );
+        }
+
         const newSessionId =
           data.sessionId;
 
@@ -365,9 +351,7 @@ export default function Interview() {
           firstQuestion,
         ]);
 
-        setSessionId(
-          newSessionId
-        );
+        setSessionId(newSessionId);
 
         setCurrentIndex(0);
 
@@ -444,8 +428,7 @@ export default function Interview() {
   // =====================================================
 
   const handleInputChange = (e) => {
-    const value =
-      e.target.value;
+    const value = e.target.value;
 
     setAnswers((prev) => {
       const updated = {
@@ -460,6 +443,125 @@ export default function Interview() {
 
       return updated;
     });
+  };
+
+  // =====================================================
+  // GET QUESTION ID
+  // =====================================================
+
+  const getQuestionId = (question) => {
+    return (
+      question?.id ??
+      question?.question_id ??
+      question?.questionId ??
+      null
+    );
+  };
+
+  // =====================================================
+  // EVALUATE CURRENT ANSWER
+  // =====================================================
+
+  const evaluateCurrentAnswer = async ({
+    currentQuestion,
+    currentAnswer,
+    candidateId,
+  }) => {
+    const currentQuestionId =
+      getQuestionId(currentQuestion);
+
+    console.log(
+      "========== CURRENT QUESTION =========="
+    );
+
+    console.dir(
+      currentQuestion,
+      { depth: null }
+    );
+
+    console.log(
+      "CURRENT QUESTION ID:",
+      currentQuestionId
+    );
+
+    if (!currentQuestionId) {
+      throw new Error(
+        "Question ID is missing."
+      );
+    }
+
+    console.log(
+      "========== EVALUATING ANSWER =========="
+    );
+
+    const evaluationResult =
+      await evaluateInterviewAnswer({
+        candidateId,
+
+        sessionId,
+
+        currentQuestionId,
+
+        currentAnswer:
+          currentAnswer.trim(),
+
+        roleId:
+          Number(roleId),
+
+        companyId:
+          companyId
+            ? Number(companyId)
+            : null,
+      });
+
+    console.log(
+      "========== ANSWER EVALUATION =========="
+    );
+
+    console.dir(
+      evaluationResult,
+      { depth: null }
+    );
+
+    if (
+      !evaluationResult ||
+      evaluationResult.success === false
+    ) {
+      throw new Error(
+        evaluationResult?.error ||
+        evaluationResult?.details ||
+        "Answer evaluation failed."
+      );
+    }
+
+    return {
+  questionId: currentQuestionId,
+
+  question:
+    currentQuestion.question_text ||
+    currentQuestion.question ||
+    "",
+
+  student_answer:
+    currentAnswer.trim(),
+
+  topic:
+    currentQuestion.topic ||
+    topic ||
+    "General",
+
+  // Store only the final score for display
+  final_score: Number(
+    evaluationResult?.evaluation?.final_score ??
+    evaluationResult?.evaluation?.score ??
+    0
+  ) || 0,
+
+  feedback:
+    evaluationResult?.evaluation?.feedback ||
+    evaluationResult?.evaluation?.result ||
+    "",
+};
   };
 
   // =====================================================
@@ -502,8 +604,7 @@ export default function Interview() {
       // USER
       // =================================================
 
-      const user =
-        getCurrentUser();
+      const user = getCurrentUser();
 
       const candidateId =
         user?.id || null;
@@ -515,28 +616,79 @@ export default function Interview() {
       }
 
       // =================================================
-      // CURRENT QUESTION ID
+      // STEP 1
+      // EVALUATE + SAVE CURRENT ANSWER
       // =================================================
 
-      const currentQuestionId =
-        currentQuestion.id ||
-        currentQuestion.question_id;
-
-      if (!currentQuestionId) {
-        throw new Error(
-          "Current question ID not found."
-        );
-      }
+      const evaluation =
+        await evaluateCurrentAnswer({
+          currentQuestion,
+          currentAnswer,
+          candidateId,
+        });
 
       // =================================================
-      // CALL BACKEND
-      //
-      // Backend:
-      // 1. Evaluates current answer
-      // 2. Saves answer
-      // 3. Updates performance
-      // 4. Calculates difficulty
-      // 5. Generates next question
+      // SAVE EVALUATION
+      // =================================================
+
+      const updatedEvaluations = [
+        ...evaluatedAnswers,
+        evaluation,
+      ];
+
+      setEvaluatedAnswers(
+        updatedEvaluations
+      );
+
+      sessionStorage.setItem(
+        "current_interview_evaluations",
+        JSON.stringify(
+          updatedEvaluations
+        )
+      );
+
+      // =================================================
+      // STEP 2
+      // UPDATE HISTORY
+      // =================================================
+
+      const currentHistoryItem = {
+        questionId: evaluation.questionId,
+
+        question: evaluation.question,
+
+        answer: evaluation.student_answer,
+
+        topic: evaluation.topic,
+
+        score: evaluation.final_score,
+
+        difficulty:
+          currentQuestion.difficulty || "Medium",
+
+        feedback: evaluation.feedback,
+      };
+
+      const updatedHistory = [
+      ...history.filter(
+        (item) =>
+          item.questionId !== evaluation.questionId
+      ),
+      currentHistoryItem,
+    ];
+
+      setHistory(updatedHistory);
+
+      sessionStorage.setItem(
+        "current_interview_history",
+        JSON.stringify(
+          updatedHistory
+        )
+      );
+
+      // =================================================
+      // STEP 3
+      // GENERATE NEXT QUESTION
       // =================================================
 
       console.log(
@@ -557,18 +709,32 @@ export default function Interview() {
 
           sessionId,
 
-          currentQuestionId,
+          currentQuestionId:
+            evaluation.questionId,
+
+          currentQuestion:
+            currentQuestion.question_text ||
+            currentQuestion.question ||
+            "",
 
           currentAnswer:
             currentAnswer.trim(),
 
-          topic,
+          topic:
+            currentQuestion.topic ||
+            topic ||
+            "General",
 
-          question_type,
+          question_type:
+            currentQuestion.question_type ||
+            question_type,
 
-          category,
+          category:
+            currentQuestion.category ||
+            category,
 
-          history,
+          history:
+            updatedHistory,
         });
 
       console.log(
@@ -593,94 +759,35 @@ export default function Interview() {
       }
 
       // =================================================
-      // SAVE EVALUATION
-      // =================================================
-
-      const evaluation = {
-        question:
-          currentQuestion.question_text ||
-          currentQuestion.question ||
-          "",
-
-        student_answer:
-          currentAnswer,
-
-        topic:
-          currentQuestion.topic ||
-          topic ||
-          "General",
-
-        final_score:
-          Number(
-            nextResult.evaluation?.score || 0
-          ),
-
-        feedback:
-          nextResult.evaluation?.feedback ||
-          "",
-      };
-
-      const updatedEvaluations = [
-        ...evaluatedAnswers,
-        evaluation,
-      ];
-
-      setEvaluatedAnswers(
-        updatedEvaluations
-      );
-
-      sessionStorage.setItem(
-        "current_interview_evaluations",
-        JSON.stringify(
-          updatedEvaluations
-        )
-      );
-
-      // =================================================
-      // SAVE HISTORY
-      // =================================================
-
-      const updatedHistory =
-        Array.isArray(nextResult.history)
-          ? nextResult.history
-          : [
-              ...history,
-              {
-                question:
-                  evaluation.question,
-
-                answer:
-                  currentAnswer,
-
-                score:
-                  evaluation.final_score,
-
-                difficulty:
-                  currentQuestion.difficulty ||
-                  "Medium",
-
-                feedback:
-                  evaluation.feedback,
-              },
-            ];
-
-      setHistory(
-        updatedHistory
-      );
-
-      sessionStorage.setItem(
-        "current_interview_history",
-        JSON.stringify(
-          updatedHistory
-        )
-      );
-
-      // =================================================
-      // ADD NEXT QUESTION
+      // IMPORTANT
+      // PRESERVE DATABASE ID
       // =================================================
 
       const nextQuestion =
         nextResult.nextQuestion;
+
+      console.log(
+        "NEXT QUESTION OBJECT:",
+        nextQuestion
+      );
+
+      const nextQuestionId =
+        getQuestionId(nextQuestion);
+
+      console.log(
+        "NEXT QUESTION ID:",
+        nextQuestionId
+      );
+
+      if (!nextQuestionId) {
+        throw new Error(
+          "Backend returned next question without a database ID."
+        );
+      }
+
+      // =================================================
+      // ADD NEXT QUESTION
+      // =================================================
 
       const updatedQuestions = [
         ...questions,
@@ -725,288 +832,292 @@ export default function Interview() {
     }
   };
 
-// =====================================================
-// SUBMIT FINAL QUESTION
-// =====================================================
+  // =====================================================
+  // SUBMIT FINAL QUESTION
+  // =====================================================
 
-const handleSubmit = async () => {
-  try {
-    setIsSubmitting(true);
-    setErrorMessage("");
+  const handleSubmit = async () => {
+    try {
+      setIsSubmitting(true);
+      setErrorMessage("");
 
-    // ===================================================
-    // CURRENT QUESTION + ANSWER
-    // ===================================================
+      const currentQuestion =
+        questions[currentIndex];
 
-    const currentQuestion =
-      questions[currentIndex];
+      const currentAnswer =
+        answers[currentIndex];
 
-    const currentAnswer =
-      answers[currentIndex];
+      // =================================================
+      // VALIDATE
+      // =================================================
 
-    if (!currentQuestion) {
-      throw new Error(
-        "Final question not found."
-      );
-    }
-
-    if (
-      !currentAnswer ||
-      !currentAnswer.trim()
-    ) {
-      throw new Error(
-        "Please provide an answer."
-      );
-    }
-
-    if (!sessionId) {
-      throw new Error(
-        "Interview session not found."
-      );
-    }
-
-    // ===================================================
-    // CURRENT USER
-    // ===================================================
-
-    const user =
-      getCurrentUser();
-
-    const candidateId =
-      user?.id || null;
-
-    if (!candidateId) {
-      throw new Error(
-        "User not found. Please login again."
-      );
-    }
-
-    // ===================================================
-    // QUESTION ID
-    // ===================================================
-
-    const currentQuestionId =
-      currentQuestion.id ||
-      currentQuestion.question_id;
-
-    if (!currentQuestionId) {
-      throw new Error(
-        "Final question ID not found."
-      );
-    }
-
-    // ===================================================
-    // START TIME
-    // ===================================================
-
-    const startedAt =
-      sessionStorage.getItem(
-        "current_interview_started_at"
-      );
-
-    // ===================================================
-    // SUBMIT FINAL ANSWER
-    //
-    // This calls:
-    //
-    // POST /api/interview/evaluate
-    //
-    // through submitAnswers() in api.js
-    // ===================================================
-
-    console.log(
-      "========== SUBMITTING FINAL INTERVIEW =========="
-    );
-
-    const result =
-      await submitAnswers({
-        candidateId,
-
-        sessionId,
-
-        companyId:
-          companyId
-            ? Number(companyId)
-            : null,
-
-        roleId:
-          roleId
-            ? Number(roleId)
-            : null,
-
-        currentQuestionId,
-
-        currentAnswer:
-          currentAnswer.trim(),
-
-        testType:
-          "interview",
-
-        startedAt,
-
-        // Send existing evaluated answers too
-        answers:
-          Array.isArray(evaluatedAnswers)
-            ? evaluatedAnswers
-            : [],
-      });
-
-    console.log(
-      "========== FINAL SUBMISSION RESPONSE =========="
-    );
-
-    console.dir(
-      result,
-      { depth: null }
-    );
-
-    // ===================================================
-    // VALIDATE BACKEND RESPONSE
-    // ===================================================
-
-    if (
-      !result ||
-      !result.success
-    ) {
-      throw new Error(
-        result?.details ||
-        result?.error ||
-        result?.message ||
-        "Interview submission failed."
-      );
-    }
-
-    // ===================================================
-    // FINAL SESSION ID
-    // ===================================================
-
-    const finalSessionId =
-      result.sessionId ||
-      sessionId;
-
-    // ===================================================
-    // SAVE FEEDBACK DATA BEFORE CLEARING SESSION
-    //
-    // Feedback.jsx can read this from location.state.
-    // ===================================================
-
-    const feedbackState = {
-      candidateId,
-
-      sessionId:
-        finalSessionId,
-
-      role:
-        role || "General",
-
-      company:
-        company || "General",
-
-      roleId:
-        roleId
-          ? Number(roleId)
-          : null,
-
-      companyId:
-        companyId
-          ? Number(companyId)
-          : null,
-
-      topic:
-        topic || "General",
-
-      testType:
-        "interview",
-
-      // Backend final response
-      result,
-
-      // All evaluations collected during interview
-      evaluations:
-        Array.isArray(evaluatedAnswers)
-          ? evaluatedAnswers
-          : [],
-
-      // Interview history
-      history:
-        Array.isArray(history)
-          ? history
-          : [],
-    };
-
-    console.log(
-      "========== NAVIGATING TO FEEDBACK =========="
-    );
-
-    console.dir(
-      feedbackState,
-      { depth: null }
-    );
-
-    // ===================================================
-    // CLEAR ACTIVE INTERVIEW SESSION
-    // ===================================================
-
-    sessionStorage.removeItem(
-      "current_interview_questions"
-    );
-
-    sessionStorage.removeItem(
-      "current_interview_answers"
-    );
-
-    sessionStorage.removeItem(
-      "current_interview_evaluations"
-    );
-
-    sessionStorage.removeItem(
-      "current_interview_history"
-    );
-
-    sessionStorage.removeItem(
-      "current_interview_session_id"
-    );
-
-    sessionStorage.removeItem(
-      "current_interview_started_at"
-    );
-
-    sessionStorage.removeItem(
-      "current_interview"
-    );
-
-    // ===================================================
-    // GO TO FEEDBACK PAGE
-    // ===================================================
-
-    navigate(
-      "/feedback",
-      {
-        state: feedbackState,
-        replace: true,
+      if (!currentQuestion) {
+        throw new Error(
+          "Current question not found."
+        );
       }
-    );
 
-  } catch (error) {
-    console.error(
-      "Final interview submission failed:",
-      error
-    );
+      if (
+        !currentAnswer ||
+        !currentAnswer.trim()
+      ) {
+        throw new Error(
+          "Please answer the question before submitting."
+        );
+      }
 
-    const message =
-      error?.response?.data?.details ||
-      error?.response?.data?.error ||
-      error?.response?.data?.message ||
-      error?.message ||
-      "Interview submission failed.";
+      if (!sessionId) {
+        throw new Error(
+          "Interview session not found."
+        );
+      }
 
-    setErrorMessage(message);
+      // =================================================
+      // USER
+      // =================================================
 
-  } finally {
-    setIsSubmitting(false);
-  }
-};
+      const user = getCurrentUser();
 
+      const candidateId =
+        user?.id || null;
+
+      if (!candidateId) {
+        throw new Error(
+          "User not found. Please login again."
+        );
+      }
+
+      // =================================================
+      // QUESTION ID
+      // =================================================
+
+      console.log(
+        "========== FINAL QUESTION DEBUG =========="
+      );
+
+      console.log(
+        "currentIndex:",
+        currentIndex
+      );
+
+      console.dir(
+        currentQuestion,
+        { depth: null }
+      );
+
+      console.log(
+        "all questions:",
+        questions
+      );
+
+      const currentQuestionId =
+        getQuestionId(
+          currentQuestion
+        );
+
+      console.log(
+        "FINAL QUESTION ID:",
+        currentQuestionId
+      );
+
+      if (!currentQuestionId) {
+        throw new Error(
+          "Question ID is missing."
+        );
+      }
+
+      // =================================================
+      // STEP 1
+      // EVALUATE + SAVE Q5
+      // =================================================
+
+      const evaluation =
+        await evaluateCurrentAnswer({
+          currentQuestion,
+          currentAnswer,
+          candidateId,
+        });
+
+      console.log(
+        "========== Q5 EVALUATION =========="
+      );
+
+      console.dir(
+        evaluation,
+        { depth: null }
+      );
+
+      // =================================================
+      // STEP 2
+      // SAVE Q5 EVALUATION TO FRONTEND STATE
+      // =================================================
+
+      const updatedEvaluations = [
+        ...evaluatedAnswers,
+        evaluation,
+      ];
+
+      setEvaluatedAnswers(
+        updatedEvaluations
+      );
+
+      sessionStorage.setItem(
+        "current_interview_evaluations",
+        JSON.stringify(
+          updatedEvaluations
+        )
+      );
+
+      // =================================================
+      // STEP 3
+      // SAVE Q5 HISTORY
+      // =================================================
+
+      const updatedHistory = [
+        ...history,
+        {
+          question:
+            evaluation.question,
+
+          answer:
+            evaluation.student_answer,
+
+          topic:
+            evaluation.topic,
+
+          score:
+            evaluation.final_score,
+
+          difficulty:
+            currentQuestion.difficulty ||
+            "Medium",
+
+          feedback:
+            evaluation.feedback,
+        },
+      ];
+
+      setHistory(
+        updatedHistory
+      );
+
+      sessionStorage.setItem(
+        "current_interview_history",
+        JSON.stringify(
+          updatedHistory
+        )
+      );
+
+      // =================================================
+      // STEP 4
+      // GET START TIME
+      // =================================================
+
+      const startedAt =
+        sessionStorage.getItem(
+          "current_interview_started_at"
+        );
+
+      // =================================================
+      // STEP 5
+      // GENERATE FINAL REPORT
+      // =================================================
+
+      console.log(
+        "========== GENERATING FINAL INTERVIEW REPORT =========="
+      );
+
+      const finalResult =
+        await evaluateInterview({
+          candidateId,
+
+          sessionId,
+
+          roleId:
+            Number(roleId),
+
+          companyId:
+            companyId
+              ? Number(companyId)
+              : null,
+
+          testType:
+            "interview",
+
+          startedAt,
+        });
+
+      console.log(
+        "========== FINAL INTERVIEW RESULT =========="
+      );
+
+      console.dir(
+        finalResult,
+        { depth: null }
+      );
+
+      if (
+        !finalResult ||
+        finalResult.success === false
+      ) {
+        throw new Error(
+          finalResult?.error ||
+          finalResult?.details ||
+          "Failed to generate final interview report."
+        );
+      }
+
+      // =================================================
+      // STEP 6
+      // NAVIGATE TO FEEDBACK
+      // =================================================
+
+      navigate(
+        "/feedback",
+        {
+          state: {
+            report:
+              finalResult.report,
+
+            overallScore:
+              finalResult.overallScore,
+
+            totalQuestions:
+              finalResult.totalQuestions,
+
+            correctAnswers:
+              finalResult.correctAnswers,
+
+            durationMinutes:
+              finalResult.durationMinutes,
+
+            candidateId,
+
+            sessionId,
+          },
+        }
+      );
+
+    } catch (error) {
+      console.error(
+        "Final interview submission failed:",
+        error
+      );
+
+      const message =
+        error?.response?.data?.details ||
+        error?.response?.data?.error ||
+        error?.message ||
+        "Failed to submit interview.";
+
+      setErrorMessage(message);
+
+      alert(message);
+
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   // =====================================================
   // LOADING
@@ -1034,11 +1145,9 @@ const handleSubmit = async () => {
         <div className="w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mb-4" />
 
         <h2 className="text-2xl font-bold text-gray-800">
-
           {isSubmitting
             ? "Submitting your interview..."
             : "Evaluating your answer and generating the next question..."}
-
         </h2>
 
         <p className="text-gray-500 mt-2">
@@ -1153,18 +1262,14 @@ const handleSubmit = async () => {
       <div className="flex justify-between items-center mb-6">
 
         <h2 className="text-xl font-bold text-blue-700">
-
           Question{" "}
           {currentIndex + 1} of{" "}
           {TOTAL}
-
         </h2>
 
         <span className="text-sm text-gray-500 font-semibold">
-
           {currentQuestion.difficulty ||
             "Medium"}
-
         </span>
 
       </div>
@@ -1174,9 +1279,7 @@ const handleSubmit = async () => {
       <div className="mb-8">
 
         <p className="text-2xl font-semibold text-gray-800 mb-4">
-
           {questionText}
-
         </p>
 
         <textarea
@@ -1200,13 +1303,9 @@ const handleSubmit = async () => {
       {/* Error */}
 
       {errorMessage && (
-
         <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-600">
-
           {errorMessage}
-
         </div>
-
       )}
 
       {/* Navigation */}
@@ -1226,9 +1325,7 @@ const handleSubmit = async () => {
             }
             className="bg-green-600 text-white px-8 py-3 rounded-lg font-bold hover:bg-green-700 shadow-lg disabled:bg-gray-400 disabled:cursor-not-allowed"
           >
-
             Submit Interview ✅
-
           </button>
 
         ) : (
@@ -1244,9 +1341,7 @@ const handleSubmit = async () => {
             }
             className="bg-blue-600 text-white px-8 py-3 rounded-lg font-bold hover:bg-blue-700 shadow-lg disabled:bg-gray-400 disabled:cursor-not-allowed"
           >
-
             Evaluate & Next ➔
-
           </button>
 
         )}

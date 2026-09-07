@@ -852,51 +852,22 @@ export default function Feedback() {
                 </thead>
 
                 <tbody>
+                  {scores.map((item, index) => (
+                    <tr
+                      key={item.question_number ?? index}
+                      className="border-b border-gray-100 last:border-0 hover:bg-gray-50"
+                    >
+                      <td className="py-5 px-3 font-semibold text-gray-700">
+                        Q{item.question_number ?? index + 1}
+                      </td>
 
-                  {scores.map(
-                    (item, index) => (
-
-                      <tr
-                        key={
-                          item.question_number ??
-                          index
-                        }
-                        className="border-b border-gray-100 last:border-0 hover:bg-gray-50"
-                      >
-
-                        <td className="py-5 px-3 font-semibold text-gray-700">
-                          Q
-                          {item.question_number ??
-                            index + 1}
-                        </td>
-
-                        <td className="text-center py-5 px-3 text-gray-600">
-                          {formatScore(
-                            item.llm_score
-                          )}
-                        </td>
-
-                        <td className="text-center py-5 px-3 text-gray-600">
-                          {formatScore(
-                            item.smith_waterman_score
-                          )}
-                        </td>
-
-                        <td className="text-center py-5 px-3">
-
-                          <span className="inline-block bg-blue-50 text-blue-700 px-4 py-1.5 rounded-full font-bold">
-                            {formatScore(
-                              item.final_score
-                            )}
-                          </span>
-
-                        </td>
-
-                      </tr>
-
-                    )
-                  )}
-
+                      <td className="text-center py-5 px-3">
+                        <span className="inline-block bg-blue-50 text-blue-700 px-4 py-1.5 rounded-full font-bold">
+                          {formatScore(item.final_score)}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
 
               </table>

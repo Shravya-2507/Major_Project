@@ -23,6 +23,11 @@ Question:
 
 Candidate answer:
 {answer}
+Role:
+{role}
+
+Company:
+{company}
 
 Give a score from 0 to 100 based on:
 - correctness

@@ -3,48 +3,28 @@ import express from "express";
 import {
   generateQuestions,
   generateNextQuestion,
+  evaluateSingleAnswer,
   evaluateInterview,
   generateReport,
 } from "../controllers/interviewController.js";
 
 const router = express.Router();
 
-// ===============================================
-// GENERATE FIRST INTERVIEW QUESTION
-// ===============================================
+// Generate first interview question
+router.post("/questions", generateQuestions);
 
-router.post(
-  "/questions",
-  generateQuestions
-);
+// Submit answer and generate next adaptive question
+router.post("/next-question", generateNextQuestion);
 
-// ===============================================
-// SUBMIT ANSWER + GET NEXT ADAPTIVE QUESTION
-// ===============================================
+// Evaluate ONE interview answer
+router.post("/evaluate", evaluateSingleAnswer);
 
-router.post(
-  "/next-question",
-  generateNextQuestion
-);
+// Finish interview and generate final report
+router.post("/evaluate-interview", evaluateInterview);
 
-// ===============================================
-// FINISH INTERVIEW
-// ===============================================
-
-router.post(
-  "/evaluate",
-  evaluateInterview
-);
-
-// ===============================================
-// GET INTERVIEW REPORT
-// ===============================================
-
-router.get(
-  "/analyze/:candidateId",
-  generateReport
-);
-
-export default router;
+// Get interview report
+router.get("/analyze/:candidateId", generateReport);
 
 console.log("✅ interviewRoutes loaded");
+
+export default router;

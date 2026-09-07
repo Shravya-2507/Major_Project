@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
-from typing import List, Optional
+from typing import List, Dict, Any, Optional
 from fastapi.middleware.cors import CORSMiddleware
 import logging
 import traceback
@@ -99,7 +99,7 @@ class AdaptiveQuestionRequest(BaseModel):
 
     questions: List[Question]
     user_answers: List[str]
-
+    scores: List[float]
 
 
 # =========================================================
@@ -341,8 +341,7 @@ def analyze(
         ]
 
         topic_scores = analyze_topics(
-            questions,
-            req.user_answers
+            questions
         )
 
         topic_avg = calculate_topic_performance(
@@ -596,214 +595,166 @@ def generate_interview_question(
 # =========================================================
 # NEXT ADAPTIVE QUESTION
 # =========================================================
-# =========================================================
-
-# NEXT ADAPTIVE QUESTION
-
-# =========================================================
 @app.post("/next-question")
-def next_question(
-    req: AdaptiveQuestionRequest
-):
-
+def next_question(req: AdaptiveQuestionRequest):
     try:
 
-        # -------------------------------------------------
+        # =================================================
         # VALIDATION
-        # -------------------------------------------------
+        # =================================================
 
         if not req.questions:
-
             raise HTTPException(
                 status_code=400,
-                detail="No previous questions provided"
+                detail="No interview history provided"
             )
 
-        if len(req.questions) != len(
-            req.user_answers
+        if len(req.questions) != len(req.user_answers):
+            raise HTTPException(
+                status_code=400,
+                detail="Mismatch between questions and user_answers"
+            )
+
+        if len(req.questions) != len(req.scores):
+            raise HTTPException(
+                status_code=400,
+                detail="Mismatch between questions and scores"
+            )
+
+        # =================================================
+        # BUILD HISTORY WITH ACTUAL EVALUATION SCORES
+        # =================================================
+
+        history = []
+
+        for question, user_answer, score in zip(
+            req.questions,
+            req.user_answers,
+            req.scores
         ):
+            history.append({
+                "question": question.question,
+                "answer": user_answer,
+                "topic": question.topic,
+                "score": float(score)
+            })
 
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    "Mismatch between questions "
-                    "and user_answers"
-                )
-            )
+        # =================================================
+        # ANALYZE TOPICS
+        # =================================================
 
-        # -------------------------------------------------
-        # CONVERT QUESTIONS TO DICTS
-        # -------------------------------------------------
-
-        questions = [
-            q.model_dump()
-            for q in req.questions
-        ]
-
-        # -------------------------------------------------
-        # ANALYZE TOPIC PERFORMANCE
-        # -------------------------------------------------
-
-        topic_scores = analyze_topics(
-            questions,
-            req.user_answers
-        )
+        topic_scores = analyze_topics(history)
 
         topic_avg = calculate_topic_performance(
             topic_scores
         )
 
         if not topic_avg:
-
             raise HTTPException(
                 status_code=400,
-                detail="Unable to analyze topics"
+                detail="Unable to analyze topic performance"
             )
 
-        # -------------------------------------------------
-        # PAGE RANK
-        # -------------------------------------------------
+        # =================================================
+        # PAGERANK
+        # =================================================
 
-        pagerank = pagerank_topics(
-            topic_avg
-        )
+        pagerank = pagerank_topics(topic_avg)
 
-        # -------------------------------------------------
+        # =================================================
         # FIND WEAKEST TOPIC
-        # -------------------------------------------------
+        # =================================================
 
         weakest_topic = min(
             topic_avg,
             key=topic_avg.get
         )
 
-        weakest_score = topic_avg[
-            weakest_topic
-        ]
+        weakest_score = topic_avg[weakest_topic]
 
-        # -------------------------------------------------
-        # BUILD REAL INTERVIEW HISTORY
-        #
-        # This is important for adaptive difficulty.
-        # Do NOT send only {"score": score}.
-        # -------------------------------------------------
-
-        history = []
-
-        for index, question in enumerate(
-            questions
-        ):
-
-            answer = req.user_answers[index]
-
-            history.append({
-
-                "question":
-                    question.get(
-                        "question",
-                        ""
-                    ),
-
-                "answer":
-                    answer,
-
-                "topic":
-                    question.get(
-                        "topic",
-                        "General"
-                    ),
-
-                # Use topic score when available
-                "score":
-                    topic_avg.get(
-                        question.get(
-                            "topic",
-                            "General"
-                        ),
-                        weakest_score
-                    )
-            })
-
-        # -------------------------------------------------
-        # GENERATE NEXT QUESTION
-        # -------------------------------------------------
-
-        generated = generate_question(
-
-            role=req.role,
-
-            company=req.company or "General",
-
-            topic=weakest_topic,
-
-            history=history,
-
-            question_type=req.question_type,
-
-            category=req.category
-
+        logging.info(
+            "========== ADAPTIVE ANALYSIS =========="
         )
 
-        # -------------------------------------------------
-        # RETURN FLAT RESPONSE
-        # -------------------------------------------------
+        logging.info(
+            "Topic scores: %s",
+            topic_avg
+        )
+
+        logging.info(
+            "Weakest topic: %s",
+            weakest_topic
+        )
+
+        logging.info(
+            "Weakest score: %s",
+            weakest_score
+        )
+
+        logging.info(
+            "======================================="
+        )
+
+        # =================================================
+        # GENERATE NEXT QUESTION
+        # =================================================
+
+        generated = generate_question(
+            role=req.role,
+            company=req.company or "General",
+            topic=weakest_topic,
+            history=history,
+            question_type=req.question_type,
+            category=req.category
+        )
+
+        # =================================================
+        # RESPONSE
+        # =================================================
 
         return {
+            "success": True,
 
-            "question":
-                generated.get(
+            "nextQuestion": {
+                "question": generated.get(
                     "question",
                     ""
                 ),
 
-            "expected_answer":
-                generated.get(
+                "expected_answer": generated.get(
                     "expected_answer",
                     ""
                 ),
 
-            "difficulty":
-                generated.get(
+                "difficulty": generated.get(
                     "difficulty",
                     "Medium"
                 ),
 
-            "topic":
-                generated.get(
+                "topic": generated.get(
                     "topic",
                     weakest_topic
                 ),
 
-            "company":
-                generated.get(
+                "company": generated.get(
                     "company",
                     req.company or "General"
                 ),
 
-            "role":
-                generated.get(
+                "role": generated.get(
                     "role",
                     req.role
                 ),
 
-            "question_type":
-                req.question_type,
+                "question_type": req.question_type,
+                "category": req.category
+            },
 
-            "category":
-                req.category,
-
-            "topic_scores":
-                topic_avg,
-
-            "pagerank":
-                pagerank,
-
-            "weakest_topic":
-                weakest_topic,
-
-            "weakest_score":
-                weakest_score
-
+            "topic_scores": topic_avg,
+            "pagerank": pagerank,
+            "weakest_topic": weakest_topic,
+            "weakest_score": weakest_score,
+            "history": history
         }
 
     except HTTPException:

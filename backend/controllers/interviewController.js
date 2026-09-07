@@ -728,509 +728,483 @@ export const generateQuestions =
 // GENERATE NEXT QUESTION
 // =====================================================
 
-export const generateNextQuestion =
-  async (req, res) => {
-    try {
-      const {
-        candidateId,
-        roleId,
-        companyId,
-        sessionId,
-        currentQuestionId,
-        currentAnswer,
-        topic = "General",
-        history = [],
-        question_type = "Technical",
-        category = "Conceptual",
-      } = req.body;
-
-      console.log(
-        "========== GENERATING NEXT QUESTION =========="
-      );
-
-      console.log({
-        candidateId,
-        roleId,
-        companyId,
-        sessionId,
-        currentQuestionId,
-        topic,
-        question_type,
-        category,
-        historyLength:
-          Array.isArray(history)
-            ? history.length
-            : 0,
-      });
-
-      // =================================================
-      // VALIDATION
-      // =================================================
-
-      if (!roleId) {
-        return res.status(400).json({
-          success: false,
-          error:
-            "roleId is required",
-        });
-      }
-
-      if (!sessionId) {
-        return res.status(400).json({
-          success: false,
-          error:
-            "sessionId is required",
-        });
-      }
-
-      if (!currentQuestionId) {
-        return res.status(400).json({
-          success: false,
-          error:
-            "currentQuestionId is required",
-        });
-      }
-
-      if (
-        !currentAnswer ||
-        !String(
-          currentAnswer
-        ).trim()
-      ) {
-        return res.status(400).json({
-          success: false,
-          error:
-            "currentAnswer is required",
-        });
-      }
-
-      // =================================================
-      // DETAILS
-      // =================================================
-
-      const {
-        role,
-        company,
-        roleId: validRoleId,
-        companyId:
-          validCompanyId,
-      } = await getInterviewDetails(
-        roleId,
-        companyId
-      );
-
-      // =================================================
-      // CURRENT QUESTION
-      // =================================================
-
-      const questionResult =
-        await pool.query(
-          `
-          SELECT
-            id,
-            question_text,
-            expected_answer,
-            difficulty_level,
-            question_type,
-            category
-          FROM questions
-          WHERE id = $1
-          LIMIT 1
-          `,
-          [currentQuestionId]
-        );
-
-      if (
-        questionResult.rows.length === 0
-      ) {
-        return res.status(404).json({
-          success: false,
-          error:
-            "Current question not found",
-        });
-      }
-
-      const currentQuestion =
-        questionResult.rows[0];
-
-      // =================================================
-      // EVALUATE
-      // =================================================
-
-      const evaluation =
-        await evaluateAnswer(
-          currentAnswer,
-          currentQuestion.expected_answer ||
-            "",
-          role,
-          company
-        );
-
-      const score =
-        Number(
-          evaluation.final_score ??
-            evaluation.score ??
-            0
-        ) || 0;
-
-      const feedback =
-        evaluation.feedback ??
-        evaluation.result ??
-        "No feedback available";
-
-      console.log(
-        "========== ANSWER EVALUATION =========="
-      );
-
-      console.log({
-        score,
-        feedback,
-      });
-
-      // =================================================
-      // NEXT DIFFICULTY
-      // =================================================
-
-      const nextDifficulty =
-        getNextDifficulty(
-          score
-        );
-
-      console.log(
-        "Next difficulty:",
-        nextDifficulty
-      );
-
-      // =================================================
-      // SAVE ANSWER
-      // =================================================
-
-      if (candidateId) {
-        await pool.query(
-          `
-          INSERT INTO answers
-          (
-            candidate_id,
-            question_id,
-            answer_text,
-            ai_score,
-            llm_score,
-            smith_waterman_score,
-            final_score,
-            ai_feedback,
-            session_id,
-            role_id,
-            company_id
-          )
-          VALUES
-          (
-            $1,
-            $2,
-            $3,
-            $4,
-            $5,
-            $6,
-            $7,
-            $8,
-            $9,
-            $10,
-            $11
-          )
-          `,
-          [
-            candidateId,
-            currentQuestionId,
-            currentAnswer,
-
-            score,
-
-            Number(evaluation.llm_score) || 0,
-
-            Number(
-              evaluation.smith_waterman_score
-            ) || 0,
-
-            Number(evaluation.final_score) || score,
-
-            feedback,
-
-            sessionId,
-
-            validRoleId,
-
-            validCompanyId,
-          ]
-        );
-
-        await updateSubjectPerformance(
-          candidateId,
-          score,
-          currentQuestionId
-        );
-      }
-
-      // =================================================
-      // HISTORY
-      // =================================================
-
-      const safeHistory =
-        Array.isArray(history)
-          ? history
-          : [];
-
-      const adaptiveHistory = [
-        ...safeHistory,
-
-        {
-          question:
-            currentQuestion.question_text,
-
-          answer:
-            currentAnswer,
-
-          score,
-
-          difficulty:
-            currentQuestion.difficulty_level,
-
-          feedback,
-        },
-      ];
-
-      // =================================================
-      // GENERATE NEXT QUESTION
-      // =================================================
-
-      const normalizedQuestionType =
-        normalizeQuestionType(
-          question_type
-        );
-
-      const normalizedCategory =
-        normalizeCategory(
-          category
-        );
-
-      const generated =
-        await generateQuestion({
-          role,
-          company,
-
-          topic:
-            topic || "General",
-
-          question_type:
-            normalizedQuestionType,
-
-          category:
-            normalizedCategory,
-
-          history:
-            adaptiveHistory,
-
-          difficulty:
-            nextDifficulty,
-        });
-
-      console.log(
-        "========== AI GENERATED NEXT QUESTION =========="
-      );
-
-      console.dir(
-        generated,
-        { depth: null }
-      );
-
-      validateGeneratedQuestion(
-        generated
-      );
-
-      // =================================================
-      // QUESTION DATA
-      // =================================================
-
-      const questionText =
-        String(
-          generated.question
-        ).trim();
-
-      const expectedAnswer =
-        generated.expected_answer
-          ? String(
-              generated.expected_answer
-            ).trim()
-          : null;
-
-      const generatedDifficulty =
-        normalizeDifficulty(
-          generated.difficulty,
-          nextDifficulty
-        );
-
-      // =================================================
-      // SAVE NEXT QUESTION
-      // =================================================
-
-      const savedQuestion =
-        await saveQuestion({
-          questionText,
-          expectedAnswer,
-
-          roleId:
-            validRoleId,
-
-          companyId:
-            validCompanyId,
-
-          difficulty:
-            generatedDifficulty,
-
-          questionType:
-            normalizedQuestionType,
-
-          category:
-            normalizedCategory,
-
-          candidateId,
-        });
-
-      // =================================================
-      // RESPONSE
-      // =================================================
-
-      return res.status(200).json({
-        success: true,
-
-        sessionId,
-
-        evaluation: {
-          score,
-          feedback,
-
-          previousDifficulty:
-            normalizeDifficulty(
-              currentQuestion.difficulty_level
-            ),
-
-          nextDifficulty,
-        },
-
-        nextQuestion: {
-          id:
-            savedQuestion.id,
-
-          question_id:
-            savedQuestion.id,
-
-          question_text:
-            savedQuestion.question_text,
-
-          question:
-            savedQuestion.question_text,
-
-          difficulty:
-            normalizeDifficulty(
-              savedQuestion.difficulty_level
-            ),
-
-          topic:
-            generated.topic ||
-            topic,
-
-          role,
-          company,
-
-          category:
-            savedQuestion.category,
-
-          question_type:
-            savedQuestion.question_type,
-        },
-
-        history:
-          adaptiveHistory,
-      });
-
-    } catch (error) {
-      console.error(
-        "========== ADAPTIVE QUESTION ERROR =========="
-      );
-
-      console.error(
-        "Message:",
-        error?.message
-      );
-
-      console.error(
-        "PostgreSQL code:",
-        error?.code
-      );
-
-      console.error(
-        "Detail:",
-        error?.detail
-      );
-
-      console.error(
-        "Hint:",
-        error?.hint
-      );
-
-      console.error(
-        "Where:",
-        error?.where
-      );
-
-      console.error(
-        "Constraint:",
-        error?.constraint
-      );
-
-      console.error(
-        "Table:",
-        error?.table
-      );
-
-      console.error(
-        "Column:",
-        error?.column
-      );
-
-      console.error(
-        "Stack:",
-        error?.stack
-      );
-
-      console.error(
-        "============================================="
-      );
-
-      return res.status(500).json({
+// =====================================================
+// GENERATE NEXT QUESTION
+// =====================================================
+
+export const generateNextQuestion = async (req, res) => {
+  try {
+    const {
+      candidateId,
+      roleId,
+      companyId,
+      sessionId,
+      currentQuestionId,
+      currentQuestion,
+      currentAnswer,
+      topic = "General",
+      history = [],
+      question_type = "Technical",
+      category = "Conceptual",
+      role = "General",
+      company = "General",
+    } = req.body;
+
+    console.log(
+      "========== GENERATING NEXT QUESTION =========="
+    );
+
+    console.log({
+      candidateId,
+      roleId,
+      companyId,
+      sessionId,
+      currentQuestionId,
+      topic,
+      question_type,
+      category,
+      historyLength: Array.isArray(history)
+        ? history.length
+        : 0,
+    });
+
+    // =================================================
+    // VALIDATION
+    // =================================================
+
+    if (!roleId) {
+      return res.status(400).json({
         success: false,
-
-        error:
-          "Failed to generate next question",
-
-        details:
-          error?.message ||
-          "Unknown server error",
-
-        code:
-          error?.code || null,
-
-        database_detail:
-          error?.detail || null,
-
-        constraint:
-          error?.constraint || null,
+        error: "roleId is required",
       });
     }
-  };
+
+    if (!sessionId) {
+      return res.status(400).json({
+        success: false,
+        error: "sessionId is required",
+      });
+    }
+
+    if (!currentQuestion || !String(currentQuestion).trim()) {
+      return res.status(400).json({
+        success: false,
+        error: "currentQuestion is required",
+      });
+    }
+
+    if (!currentAnswer || !String(currentAnswer).trim()) {
+      return res.status(400).json({
+        success: false,
+        error: "currentAnswer is required",
+      });
+    }
+
+    // =================================================
+    // RESOLVE ROLE + COMPANY
+    // =================================================
+
+    const details = await getInterviewDetails(
+      roleId,
+      companyId
+    );
+
+    const {
+      role: resolvedRole,
+      company: resolvedCompany,
+      roleId: validRoleId,
+      companyId: validCompanyId,
+    } = details;
+
+    
+
+
+    // =================================================
+    // BUILD HISTORY FOR FASTAPI
+    // =================================================
+
+    const interviewHistory = Array.isArray(history)
+      ? history
+      : [];
+
+    // Frontend already includes the current evaluated answer.
+    // Do NOT add currentQuestion/currentAnswer again.
+
+    const adaptiveQuestions = interviewHistory.map(
+      (item) => ({
+        question: String(item.question || "").trim(),
+
+        answer: String(item.answer || "").trim(),
+
+        topic: item.topic || "General",
+
+        // Use the score already produced by /evaluate
+        score: Number(
+          item.score ??
+          item.final_score ??
+          item.finalScore ??
+          0
+        ),
+      })
+    );
+
+    if (adaptiveQuestions.length === 0) {
+      throw new Error(
+        "No interview history available for adaptive question generation."
+      );
+    }
+
+    const userAnswers = adaptiveQuestions.map(
+      (item) => item.answer
+    );
+
+    const answerScores = adaptiveQuestions.map(
+      (item) => item.score
+    );
+
+    console.log("========== ADAPTIVE HISTORY ==========");
+
+    console.log({
+      interviewHistoryLength: interviewHistory.length,
+      adaptiveQuestionsLength: adaptiveQuestions.length,
+    });
+
+    console.dir(adaptiveQuestions, {
+      depth: null,
+    });
+
+    // =================================================
+    // CALL FASTAPI
+    // =================================================
+
+    const response = await aiApi.post(
+      "/next-question",
+      {
+        role: resolvedRole || role || "General",
+
+        company:
+          resolvedCompany ||
+          company ||
+          "General",
+
+        topic: topic || "General",
+
+        question_type:
+          normalizeQuestionType(question_type),
+
+        category:
+          normalizeCategory(category),
+
+        questions:
+          adaptiveQuestions,
+
+        user_answers:
+          userAnswers,
+
+        scores:
+          answerScores,
+      }
+    );
+
+    const data = response.data || {};
+
+    console.log(
+      "========== FASTAPI NEXT QUESTION RESPONSE =========="
+    );
+
+    console.dir(data, { depth: null });
+
+    // =================================================
+    // EXTRACT GENERATED QUESTION
+    // =================================================
+
+    const generatedQuestion =
+      data.nextQuestion || data;
+
+    validateGeneratedQuestion(
+      generatedQuestion
+    );
+
+    const questionText =
+      String(
+        generatedQuestion.question || ""
+      ).trim();
+
+    const expectedAnswer =
+      generatedQuestion.expected_answer
+        ? String(
+            generatedQuestion.expected_answer
+          ).trim()
+        : null;
+
+    const difficulty =
+      normalizeDifficulty(
+        generatedQuestion.difficulty,
+        "Medium"
+      );
+
+    const normalizedQuestionType =
+      normalizeQuestionType(
+        generatedQuestion.question_type ||
+        question_type
+      );
+
+    const normalizedCategory =
+      normalizeCategory(
+        generatedQuestion.category ||
+        category
+      );
+
+    // =================================================
+    // SAVE GENERATED QUESTION
+    // =================================================
+
+    const savedQuestion =
+      await saveQuestion({
+        questionText,
+
+        expectedAnswer,
+
+        roleId:
+          validRoleId,
+
+        companyId:
+          validCompanyId,
+
+        difficulty,
+
+        questionType:
+          normalizedQuestionType,
+
+        category:
+          normalizedCategory,
+
+        candidateId,
+      });
+
+    console.log(
+      "Next question saved:",
+      savedQuestion.id
+    );
+
+    // =================================================
+    // RETURN QUESTION
+    // =================================================
+
+    const nextQuestion = {
+      id:
+        savedQuestion.id,
+
+      question_id:
+        savedQuestion.id,
+
+      question_text:
+        savedQuestion.question_text,
+
+      question:
+        savedQuestion.question_text,
+
+      expected_answer:
+        savedQuestion.expected_answer || "",
+
+      difficulty:
+        normalizeDifficulty(
+          savedQuestion.difficulty_level
+        ),
+
+      topic:
+        generatedQuestion.topic ||
+        data.topic ||
+        data.weakest_topic ||
+        topic ||
+        "General",
+
+      role:
+        resolvedRole ||
+        role ||
+        "General",
+
+      company:
+        resolvedCompany ||
+        company ||
+        "General",
+
+      question_type:
+        savedQuestion.question_type,
+
+      category:
+        savedQuestion.category,
+    };
+
+    return res.status(200).json({
+      success: true,
+
+      sessionId,
+
+      nextQuestion,
+
+      topic_scores:
+        data.topic_scores || {},
+
+      pagerank:
+        data.pagerank || {},
+
+      weakest_topic:
+        data.weakest_topic || null,
+
+      weakest_score:
+        data.weakest_score ?? null,
+
+      history:
+        adaptiveQuestions,
+    });
+
+  } catch (error) {
+    console.error(
+      "========== ADAPTIVE QUESTION ERROR =========="
+    );
+
+    console.error(
+      "Message:",
+      error?.message
+    );
+
+    console.error(
+      "Response:",
+      error?.response?.data
+    );
+
+    console.error(
+      "Stack:",
+      error?.stack
+    );
+
+    return res.status(
+      error?.response?.status || 500
+    ).json({
+      success: false,
+
+      error:
+        error?.response?.data?.detail ||
+        error?.response?.data?.error ||
+        error?.message ||
+        "Failed to generate next question",
+    });
+  }
+};
+
+
+export const evaluateSingleAnswer = async (req, res) => {
+  try {
+    const {
+      candidateId,
+      sessionId,
+      currentQuestionId,
+      currentAnswer,
+      roleId,
+      companyId,
+    } = req.body;
+
+    if (!candidateId || !sessionId || !currentQuestionId) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing evaluation information",
+      });
+    }
+
+    // Get actual question from DB
+    const questionResult = await pool.query(
+      `
+      SELECT
+        question_text,
+        expected_answer
+      FROM questions
+      WHERE id = $1
+      LIMIT 1
+      `,
+      [currentQuestionId]
+    );
+
+    if (questionResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: "Question not found",
+      });
+    }
+
+    const question = questionResult.rows[0];
+
+    const {
+      role,
+      company,
+      roleId: validRoleId,
+      companyId: validCompanyId,
+    } = await getInterviewDetails(
+      roleId,
+      companyId
+    );
+
+    const evaluation = await evaluateAnswer(
+      currentAnswer,
+      question.question_text,
+      question.expected_answer || "",
+      role,
+      company
+    );
+
+    // Save answer
+    await pool.query(
+      `
+      INSERT INTO answers
+      (
+        candidate_id,
+        question_id,
+        answer_text,
+        ai_score,
+        llm_score,
+        smith_waterman_score,
+        final_score,
+        ai_feedback,
+        session_id,
+        role_id,
+        company_id
+      )
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+      `,
+      [
+        candidateId,
+        currentQuestionId,
+        currentAnswer,
+        evaluation.final_score || 0,
+        evaluation.llm_score || 0,
+        evaluation.smith_waterman_score || 0,
+        evaluation.final_score || 0,
+        evaluation.feedback || "",
+        sessionId,
+        validRoleId,
+        validCompanyId,
+      ]
+    );
+
+    return res.json({
+      success: true,
+      evaluation,
+    });
+
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+};
+
 
 // =====================================================
 // FINISH INTERVIEW
 // =====================================================
-
 // =====================================================
 // FINISH INTERVIEW
 // =====================================================
@@ -1242,8 +1216,6 @@ export const evaluateInterview = async (req, res) => {
       sessionId,
       companyId,
       roleId,
-      currentQuestionId,
-      currentAnswer,
       testType = "interview",
       startedAt,
     } = req.body;
@@ -1257,11 +1229,6 @@ export const evaluateInterview = async (req, res) => {
       sessionId,
       companyId,
       roleId,
-      currentQuestionId,
-      hasAnswer: Boolean(
-        currentAnswer &&
-        String(currentAnswer).trim()
-      ),
       testType,
       startedAt,
     });
@@ -1285,416 +1252,218 @@ export const evaluateInterview = async (req, res) => {
     }
 
     // =================================================
-    // SAVE FINAL ANSWER
+    // GET ALL SAVED ANSWERS
     // =================================================
 
-    if (
-      currentQuestionId &&
-      currentAnswer &&
-      String(currentAnswer).trim()
-    ) {
-      // -----------------------------------------------
-      // CHECK IF FINAL ANSWER ALREADY EXISTS
-      // -----------------------------------------------
+    const answersResult = await pool.query(
+      `
+      SELECT
+        id,
+        question_id,
+        answer_text,
+        ai_score,
+        llm_score,
+        smith_waterman_score,
+        final_score,
+        ai_feedback
+      FROM answers
+      WHERE candidate_id = $1
+      AND session_id = $2
+      ORDER BY id ASC
+      `,
+      [candidateId, sessionId]
+    );
 
-      const existingAnswer =
-        await pool.query(
-          `
-          SELECT id
-          FROM answers
-          WHERE candidate_id = $1
-          AND session_id = $2
-          AND question_id = $3
-          LIMIT 1
-          `,
-          [
-            candidateId,
-            sessionId,
-            currentQuestionId,
-          ]
-        );
-
-      // -----------------------------------------------
-      // ONLY SAVE IF NOT ALREADY SAVED
-      // -----------------------------------------------
-
-      if (existingAnswer.rows.length === 0) {
-        const questionResult =
-          await pool.query(
-            `
-            SELECT
-              id,
-              question_text,
-              expected_answer,
-              difficulty_level,
-              question_type,
-              category
-            FROM questions
-            WHERE id = $1
-            LIMIT 1
-            `,
-            [currentQuestionId]
-          );
-
-        if (questionResult.rows.length === 0) {
-          return res.status(404).json({
-            success: false,
-            error: "Final question not found",
-          });
-        }
-
-        // IMPORTANT:
-        // The variable is called "question".
-        // Do NOT use currentQuestion here.
-        const question =
-          questionResult.rows[0];
-
-        console.log(
-          "Final question found:",
-          {
-            id: question.id,
-            question_text:
-              question.question_text,
-            hasExpectedAnswer:
-              Boolean(
-                question.expected_answer
-              ),
-          }
-        );
-
-        // ---------------------------------------------
-        // GET ROLE + COMPANY
-        // ---------------------------------------------
-
-        const {
-          role,
-          company,
-          roleId: validRoleId,
-          companyId: validCompanyId,
-        } = await getInterviewDetails(
-          roleId,
-          companyId
-        );
-
-        // ---------------------------------------------
-        // EVALUATE FINAL ANSWER
-        // ---------------------------------------------
-
-        console.log(
-          "========== EVALUATING FINAL ANSWER =========="
-        );
-
-        const evaluation =
-          await evaluateAnswer(
-            currentAnswer,
-            question.expected_answer || "",
-            role,
-            company
-          );
-
-        const score =
-          Number(
-            evaluation.final_score ??
-            evaluation.score ??
-            0
-          ) || 0;
-
-        const feedback =
-          evaluation.feedback ??
-          evaluation.result ??
-          "No feedback available";
-
-        console.log(
-          "Final evaluation:",
-          {
-            score,
-            feedback,
-          }
-        );
-
-        // ---------------------------------------------
-        // SAVE FINAL ANSWER
-        // ---------------------------------------------
-
-        await pool.query(
-          `
-          INSERT INTO answers
-          (
-            candidate_id,
-            question_id,
-            answer_text,
-            ai_score,
-            llm_score,
-            smith_waterman_score,
-            final_score,
-            ai_feedback,
-            session_id,
-            role_id,
-            company_id
-          )
-          VALUES
-          (
-            $1,
-            $2,
-            $3,
-            $4,
-            $5,
-            $6,
-            $7,
-            $8,
-            $9,
-            $10,
-            $11
-          )
-          `,
-          [
-            candidateId,
-
-            currentQuestionId,
-
-            currentAnswer,
-
-            Number(
-              evaluation.ai_score ??
-              score
-            ) || 0,
-
-            Number(
-              evaluation.llm_score
-            ) || 0,
-
-            Number(
-              evaluation.smith_waterman_score
-            ) || 0,
-
-            Number(
-              evaluation.final_score ??
-              score
-            ) || 0,
-
-            feedback,
-
-            sessionId,
-
-            validRoleId,
-
-            validCompanyId,
-          ]
-        );
-
-        // ---------------------------------------------
-        // UPDATE SUBJECT PERFORMANCE
-        // ---------------------------------------------
-
-        await updateSubjectPerformance(
-          candidateId,
-          score,
-          currentQuestionId
-        );
-
-        console.log(
-          "Final answer saved successfully."
-        );
-      } else {
-        console.log(
-          "Final answer already exists. Skipping duplicate insert."
-        );
-      }
-    }
-
-    // =================================================
-    // GET ALL ANSWERS FOR SESSION
-    // =================================================
-
-    const answersResult =
-      await pool.query(
-        `
-        SELECT
-          id,
-          ai_score,
-          llm_score,
-          smith_waterman_score,
-          final_score
-        FROM answers
-        WHERE candidate_id = $1
-        AND session_id = $2
-        ORDER BY id ASC
-        `,
-        [
-          candidateId,
-          sessionId,
-        ]
-      );
-
-    const answers =
-      answersResult.rows;
+    const answers = answersResult.rows;
 
     if (answers.length === 0) {
       return res.status(400).json({
         success: false,
-        error:
-          "No answers found for this session",
+        error: "No answers found for this interview",
       });
     }
 
     // =================================================
-    // CALCULATE SCORE
+    // CALCULATE OVERALL SCORE
     // =================================================
 
-    let totalScore = 0;
-    let correctAnswers = 0;
+    const scores = answers.map(
+      (answer) => Number(answer.final_score ?? 0)
+    );
 
-    for (const answer of answers) {
-      const score =
-        Number(
-          answer.final_score ??
-          answer.ai_score ??
-          0
-        ) || 0;
-
-      totalScore += score;
-
-      if (score >= 70) {
-        correctAnswers++;
-      }
-    }
+    const totalScore = scores.reduce(
+      (sum, score) => sum + score,
+      0
+    );
 
     const overallScore =
-      Number(
-        (
-          totalScore /
-          answers.length
-        ).toFixed(2)
-      );
+      totalScore / answers.length;
 
     // =================================================
-    // DURATION
+    // CALCULATE CORRECT ANSWERS
+    // SCORE > 50 = CORRECT
     // =================================================
 
-    const startedDate =
-      startedAt
-        ? new Date(startedAt)
-        : new Date();
+    const correctAnswers = scores.filter(
+      (score) => score > 50
+    ).length;
 
-    const completedAt =
-      new Date();
+    const totalQuestions = answers.length;
 
-    const durationMinutes =
-      Math.max(
-        0,
-        Math.round(
-          (
-            completedAt -
-            startedDate
-          ) / 60000
+    // =================================================
+    // CALCULATE COMPLETION TIME
+    // =================================================
+
+    const completedAt = new Date();
+
+    const startTime = startedAt
+      ? new Date(startedAt)
+      : null;
+
+    const validStartTime =
+      startTime &&
+      !Number.isNaN(startTime.getTime());
+
+    const durationMinutes = validStartTime
+      ? Math.max(
+          1,
+          Math.ceil(
+            (
+              completedAt.getTime() -
+              startTime.getTime()
+            ) / 60000
+          )
         )
-      );
+      : null;
 
     // =================================================
-    // SAVE ATTEMPT
+    // DEBUG
     // =================================================
 
-    const attemptResult =
-      await pool.query(
-        `
-        INSERT INTO test_attempts
-        (
-          candidate_id,
-          test_type,
-          company_id,
-          score,
-          total_questions,
-          correct_answers,
-          started_at,
-          completed_at,
-          duration_minutes
-        )
-        VALUES
-        (
-          $1,
-          $2,
-          $3,
-          $4,
-          $5,
-          $6,
-          $7,
-          $8,
-          $9
-        )
-        RETURNING attempt_id
-        `,
-        [
-          candidateId,
+    console.log(
+      "========== FINAL INTERVIEW SCORE =========="
+    );
 
-          testType,
-
-          companyId || null,
-
-          overallScore,
-
-          answers.length,
-
-          correctAnswers,
-
-          startedDate,
-
-          completedAt,
-
-          durationMinutes,
-        ]
-      );
-
-    // =================================================
-    // UPDATE RANKING
-    // =================================================
-
-    await updateMonthlyRanking(
+    console.log({
       candidateId,
-      overallScore
+      sessionId,
+      totalQuestions,
+      scores,
+      totalScore,
+      overallScore,
+      correctAnswers,
+      startedAt,
+      startTime,
+      completedAt,
+      durationMinutes,
+    });
+
+    console.log(
+      "============================================"
+    );
+
+
+    console.log("========== SAVING TEST ATTEMPT ==========");
+console.log({
+  candidateId,
+  companyId,
+  testType,
+  score: Number(overallScore.toFixed(2)),
+  totalQuestions,
+  correctAnswers,
+  startedAt: validStartTime ? startTime : null,
+  completedAt,
+  durationMinutes,
+});
+    // =================================================
+    // SAVE TEST ATTEMPT
+    // =================================================
+
+    const attemptResult = await pool.query(
+      `
+      INSERT INTO test_attempts
+      (
+        candidate_id,
+        company_id,
+        test_type,
+        score,
+        total_questions,
+        correct_answers,
+        started_at,
+        completed_at,
+        duration_minutes
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      RETURNING
+        attempt_id,
+        candidate_id,
+        company_id,
+        test_type,
+        score,
+        total_questions,
+        correct_answers,
+        started_at,
+        completed_at,
+        duration_minutes
+      `,
+      [
+        candidateId,
+        companyId || null,
+        testType,
+        Number(overallScore.toFixed(2)),
+        totalQuestions,
+        correctAnswers,
+        validStartTime
+          ? startTime
+          : null,
+        completedAt,
+        durationMinutes,
+      ]
+    );
+
+    const savedAttempt =
+      attemptResult.rows[0];
+
+    console.log(
+      "========== TEST ATTEMPT SAVED =========="
+    );
+
+    console.dir(
+      savedAttempt,
+      { depth: null }
+    );
+
+    console.log(
+      "========================================"
     );
 
     // =================================================
     // RESPONSE
     // =================================================
 
-    console.log(
-      "========== INTERVIEW COMPLETED =========="
-    );
-
-    console.log({
-      sessionId,
-      overallScore,
-      totalQuestions:
-        answers.length,
-      correctAnswers,
-      durationMinutes,
-      attemptId:
-        attemptResult.rows[0]
-          ?.attempt_id,
-    });
-
-    return res.status(200).json({
+    return res.json({
       success: true,
 
-      sessionId,
+      score:
+        Number(
+          overallScore.toFixed(2)
+        ),
 
-      overallScore,
-
-      totalQuestions:
-        answers.length,
+      totalQuestions,
 
       correctAnswers,
 
       durationMinutes,
 
-      attemptId:
-        attemptResult.rows[0]
-          ?.attempt_id,
+      attempt: savedAttempt,
+
+      message:
+        "Interview completed successfully",
     });
 
   } catch (error) {
     console.error(
-      "========== INTERVIEW COMPLETION ERROR =========="
+      "========== EVALUATE INTERVIEW ERROR =========="
     );
 
     console.error(
@@ -1713,34 +1482,21 @@ export const evaluateInterview = async (req, res) => {
     );
 
     console.error(
-      "Constraint:",
-      error?.constraint
-    );
-
-    console.error(
       "Stack:",
       error?.stack
     );
 
     console.error(
-      "================================================="
+      "=============================================="
     );
 
     return res.status(500).json({
       success: false,
-
       error:
-        "Interview completion failed",
-
+        "Failed to complete interview",
       details:
         error?.message ||
         "Unknown server error",
-
-      code:
-        error?.code || null,
-
-      database_detail:
-        error?.detail || null,
     });
   }
 };
@@ -1848,6 +1604,8 @@ export const generateReport =
 
             a.answer_text,
 
+            a.created_at,
+
             a.ai_score,
 
             a.llm_score,
@@ -1900,7 +1658,59 @@ export const generateReport =
 
       const rows =
         interviewResult.rows;
+      
 
+      // ===============================================
+      // CALCULATE CORRECT ANSWERS
+      // FINAL SCORE > 50 = CORRECT
+      // ===============================================
+
+      const scores = rows.map(
+        (row) => Number(row.final_score ?? 0)
+      );
+
+      const correctAnswers = scores.filter(
+        (score) => score > 50
+      ).length;
+
+      const totalQuestions = rows.length;
+
+      // ===============================================
+      // CALCULATE SESSION DURATION
+      // ===============================================
+
+      const validDates = rows
+        .map((row) => new Date(row.created_at))
+        .filter(
+          (date) => !Number.isNaN(date.getTime())
+        )
+        .sort(
+          (a, b) => a.getTime() - b.getTime()
+        );
+
+      const durationMinutes =
+        validDates.length >= 2
+          ? Math.max(
+              1,
+              Math.ceil(
+                (
+                  validDates[validDates.length - 1].getTime() -
+                  validDates[0].getTime()
+                ) / 60000
+              )
+            )
+          : 1;
+
+      console.log(
+        "========== REPORT STATS =========="
+      );
+
+      console.log({
+        totalQuestions,
+        scores,
+        correctAnswers,
+        durationMinutes,
+      });
       // ===============================================
       // VALIDATE ANSWERS
       // ===============================================
@@ -2052,92 +1862,93 @@ export const generateReport =
       }
 
       // ===============================================
-      // RETURN COMPLETE REPORT
-      // ===============================================
+// RETURN COMPLETE REPORT
+// ===============================================
 
-      return res.status(200).json({
+return res.status(200).json({
+  success: true,
 
-        success: true,
+  candidateId: Number(candidateId),
 
-        candidateId:
-          Number(candidateId),
+  sessionId: targetSession,
 
-        sessionId:
-          targetSession,
+  // Interview statistics
+  correctAnswers,
 
-        report: {
+  durationMinutes,
 
-          success:
-            report.success,
+  // Complete AI report
+  report: {
+    success: report.success,
 
-          overall_score:
-            report.overall_score ??
-            0,
+    overall_score:
+      report.overall_score ?? 0,
 
-          percentage:
-            report.percentage ??
-            report.overall_score ??
-            0,
+    percentage:
+      report.percentage ??
+      report.overall_score ??
+      0,
 
-          classification:
-            report.classification ??
-            "Not Available",
+    classification:
+      report.classification ??
+      "Not Available",
 
-          total_questions:
-            report.total_questions ??
-            answers.length,
+    total_questions:
+      totalQuestions,
 
-          summary:
-            report.summary ??
-            "No detailed summary available.",
+    correct_answers:
+      correctAnswers,
 
-          strengths:
-            Array.isArray(
-              report.strengths
-            )
-              ? report.strengths
-              : [],
+    duration_minutes:
+      durationMinutes,
 
-          weaknesses:
-            Array.isArray(
-              report.weaknesses
-            )
-              ? report.weaknesses
-              : [],
+    // Detailed feedback
+    summary:
+      report.summary ||
+      "No detailed summary available.",
 
-          recommendations:
-            Array.isArray(
-              report.recommendations
-            )
-              ? report.recommendations
-              : [],
+    strengths:
+      Array.isArray(report.strengths)
+        ? report.strengths
+        : [],
 
-          final_assessment:
-            report.final_assessment ??
-            "No final assessment available.",
+    weaknesses:
+      Array.isArray(report.weaknesses)
+        ? report.weaknesses
+        : [],
 
-          scores:
-            Array.isArray(
-              report.scores
-            )
-              ? report.scores
-              : [],
+    recommendations:
+      Array.isArray(report.recommendations)
+        ? report.recommendations
+        : [],
 
-          evaluation_method:
-            report.evaluation_method ||
-            {},
+    final_assessment:
+      report.final_assessment ||
+      report.finalAssessment ||
+      "No final assessment available.",
 
-          role:
-            report.role ||
-            role,
+    // Question-wise scores
+    scores:
+      Array.isArray(report.scores)
+        ? report.scores
+        : [],
 
-          company:
-            report.company ||
-            company,
+    // Evaluation method
+    evaluation_method:
+      report.evaluation_method || {},
 
-        },
+    // Interview details
+    role:
+      report.role ||
+      role ||
+      "General",
 
-      });
+    company:
+      report.company ||
+      company ||
+      "General",
+  },
+});
 
     } catch (error) {
 

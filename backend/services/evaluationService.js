@@ -215,6 +215,7 @@ export const checkAIService =
 export const evaluateAnswer = async (
   userAnswer,
   questionText,
+  expectedAnswer = "",
   role = "General",
   company = "General"
 ) => {
@@ -285,27 +286,22 @@ export const evaluateAnswer = async (
     // ================================================
 
     const payload = {
-      question: String(
-        questionText
-      ).trim(),
+  question: String(questionText).trim(),
 
-      student_answer: String(
-        userAnswer
-      ).trim(),
+  expected_answer: String(
+    expectedAnswer || ""
+  ).trim(),
 
-      role: String(
-        role || "General"
-      ).trim(),
+  student_answer: String(userAnswer).trim(),
 
-      company: String(
-        company || "General"
-      ).trim(),
-    };
+  role: String(
+    role || "General"
+  ).trim(),
 
-    console.log(
-      "Evaluation payload:",
-      payload
-    );
+  company: String(
+    company || "General"
+  ).trim(),
+};
 
     // ================================================
     // CALL AI API

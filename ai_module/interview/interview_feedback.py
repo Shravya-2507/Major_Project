@@ -170,7 +170,7 @@ def generate_interview_report(
 
 
 
-        llm_response = ask_llama(prompt)
+        llm_response = ask_llama(prompt, 300)
 
         # =====================================================
         # DEFAULT FEEDBACK

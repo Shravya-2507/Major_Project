@@ -1,17 +1,20 @@
-from answer_evaluation import evaluate_answer
+# =========================================================
+# ANALYZE TOPICS USING EXISTING SCORES
+# =========================================================
 
-# ✅ Step 1: Group scores by topic
-def analyze_topics(questions, user_answers):
+def analyze_topics(questions):
     topic_scores = {}
 
-    for i in range(len(questions)):
-        q = questions[i]
-        ans = user_answers[i]
+    for question in questions:
 
-        result = evaluate_answer(ans, q["answer"])
-        score = result["final_score"]
+        topic = question.get(
+            "topic",
+            "General"
+        )
 
-        topic = q["topic"]
+        score = float(
+            question.get("score", 0)
+        )
 
         if topic not in topic_scores:
             topic_scores[topic] = []
@@ -21,33 +24,57 @@ def analyze_topics(questions, user_answers):
     return topic_scores
 
 
-# ✅ Step 2: Average score per topic
+# =========================================================
+# AVERAGE TOPIC PERFORMANCE
+# =========================================================
+
 def calculate_topic_performance(topic_scores):
+
     topic_avg = {}
 
     for topic, scores in topic_scores.items():
-        topic_avg[topic] = round(sum(scores) / len(scores), 2)
+
+        if scores:
+            topic_avg[topic] = round(
+                sum(scores) / len(scores),
+                2
+            )
 
     return topic_avg
 
 
-# ✅ Step 3: Rank topics
+# =========================================================
+# RANK TOPICS
+# =========================================================
+
 def rank_topics(topic_avg):
-    return sorted(topic_avg.items(), key=lambda x: x[1], reverse=True)
+
+    return sorted(
+        topic_avg.items(),
+        key=lambda x: x[1],
+        reverse=True
+    )
 
 
-# ✅ Step 4: Classify topics (Updated for 100-point scale)
+# =========================================================
+# CLASSIFY TOPICS
+# =========================================================
+
 def classify_topics(topic_avg):
+
     result = {}
 
     for topic, score in topic_avg.items():
-        # Adjusting thresholds to match your 100-mark system
+
         if score >= 75:
             result[topic] = "Strong"
+
         elif score >= 60:
             result[topic] = "Moderate"
+
         elif score >= 40:
             result[topic] = "Average"
+
         else:
             result[topic] = "Needs Improvement"
 

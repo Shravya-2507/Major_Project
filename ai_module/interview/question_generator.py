@@ -1,5 +1,6 @@
 import json
 import re
+import time
 
 from llama.llama_client import ask_llama
 from rag.retrieve import retrieve_context
@@ -19,9 +20,15 @@ def generate_question(
     Generate a single interview question and expected answer using:
     - RAG knowledge base
     - Company interview profile
-    - Llama 3.1
+    - Llama 3.2:3b
     - Adaptive difficulty
     """
+
+    # =====================================================
+    # START TOTAL TIMER
+    # =====================================================
+
+    total_start = time.perf_counter()
 
     # =====================================================
     # SAFE DEFAULTS
@@ -47,17 +54,63 @@ def generate_question(
     # RETRIEVE RELEVANT CONTEXT
     # =====================================================
 
+    rag_start = time.perf_counter()
+
     context = retrieve_context(
         role=role,
         company=company,
         topic=topic
     )
 
+    rag_time = time.perf_counter() - rag_start
+
+    # =====================================================
+    # HANDLE RAG CONTEXT
+    # =====================================================
+
+    if isinstance(context, dict):
+
+        context = context.get(
+            "context",
+            ""
+        )
+
+    elif isinstance(context, list):
+
+        context = "\n".join(
+            str(item)
+            for item in context
+        )
+
+    elif context is None:
+
+        context = ""
+
+    else:
+
+        context = str(context)
+
+    context = context.strip()
+
     if not context:
+
         context = (
             "No reference material available. "
             "Use general interview knowledge."
         )
+
+    # Limit context to avoid unnecessarily large prompts
+    if len(context) > 1000:
+
+        context = context[:1000]
+
+    print(
+        f"RAG retrieval time: {rag_time:.2f} seconds"
+    )
+
+    print(
+        f"RAG context characters: {len(context)}"
+    )
 
     # =====================================================
     # COMPANY PROFILE
@@ -101,188 +154,79 @@ def generate_question(
     # =====================================================
 
     prompt = f"""
-You are an expert technical interviewer.
+    You are an expert technical interviewer.
 
-Generate exactly ONE interview question and ONE expected answer.
+    Generate exactly ONE interview question and ONE expected answer.
 
-=====================================
-REFERENCE MATERIAL
-=====================================
+    REFERENCE MATERIAL:
+    {context}
 
-{context}
+    CANDIDATE INFORMATION:
+    Role: {role}
+    Company: {company}
+    Difficulty: {difficulty}
+    Topic: {topic}
+    Question Type: {question_type}
+    Category: {category}
 
-=====================================
+    DIFFICULTY:
+    Easy: Basic definitions, fundamentals, simple examples.
+    Medium: Practical implementation, debugging, real-world usage.
+    Hard: Optimization, architecture decisions, advanced problem solving.
 
-CANDIDATE INFORMATION
-=====================================
+    COMPANY PROFILE:
+    Description: {description}
+    Interview Style: {interview_style}
+    Main Focus: {focus}
+    Preferred Topics: {preferred_topics}
+    Coding Level: {coding_level}
+    Behavioral Round: {behavioral}
 
-Candidate Role:
-{role}
+    PREVIOUS PERFORMANCE:
+    {performance}
 
-Target Company:
-{company}
+    IMPORTANT:
+    - Use previous questions only to avoid repetition and adjust difficulty.
+    - Do NOT repeat or rephrase a previous question.
+    - If a concept was already tested, choose a different concept, scenario, or aspect.
 
-Current Difficulty:
-{difficulty}
+    ROLE GUIDELINES:
+    Software Developer: DSA, OOP, System Design, Debugging.
+    Python Developer: Python internals, OOP, Libraries, APIs, Performance.
+    Full Stack Developer: Frontend, Backend, Database, APIs, Deployment.
+    AI/ML Intern: ML algorithms, Preprocessing, Model evaluation, Feature engineering.
+    Java Developer: Java, Spring Boot, JVM, Multithreading.
 
-Interview Topic:
-{topic}
+    STRICT RULES:
+    - Generate exactly ONE question and ONE expected answer.
+    - Match the requested role, difficulty, topic, and category.
+    - Prefer reference material when relevant.
+    - Follow the company's interview style.
+    - Expected answer must be concise, technically correct, 20–35 words, maximum 2 sentences.
+    - Include only important concepts a strong candidate should mention.
+    - No code, markdown, bullets, explanations, multiple questions, or multiple answers.
+    - Do not add text outside JSON or use code fences.
+    - Return ONLY valid JSON with properly escaped quotation marks and no literal line breaks in string values.
 
-Question Type:
-{question_type}
-
-Question Category:
-{category}
-
-=====================================
-DIFFICULTY GUIDELINES
-=====================================
-
-Easy:
-- Basic definitions
-- Fundamental concepts
-- Simple examples
-
-Medium:
-- Practical implementation
-- Debugging
-- Real-world usage
-
-Hard:
-- Optimization
-- Architecture decisions
-- Advanced problem solving
-
-=====================================
-COMPANY PROFILE
-=====================================
-
-Description:
-{description}
-
-Interview Style:
-{interview_style}
-
-Main Focus:
-{focus}
-
-Preferred Topics:
-{preferred_topics}
-
-Coding Level:
-{coding_level}
-
-Behavioral Round:
-{behavioral}
-
-Previous Candidate Performance:
-{performance}
-
-=====================================
-ROLE GUIDELINES
-=====================================
-
-Software Developer:
-- DSA
-- OOP
-- System Design
-- Debugging
-
-Python Developer:
-- Python internals
-- OOP
-- Libraries
-- APIs
-- Performance
-
-Full Stack Developer:
-- Frontend
-- Backend
-- Database
-- APIs
-- Deployment
-
-AI/ML Intern:
-- ML algorithms
-- Preprocessing
-- Model evaluation
-- Feature engineering
-
-Java Developer:
-- Java
-- Spring Boot
-- JVM
-- Multithreading
-
-=====================================
-STRICT INSTRUCTIONS
-=====================================
-
-1. Generate exactly ONE interview question.
-
-2. Generate exactly ONE expected answer.
-
-3. The question must be specific to the candidate role.
-
-4. The question must match the requested difficulty.
-
-5. Prefer the reference material whenever relevant.
-
-6. Follow the company's interview style.
-
-7. The expected answer MUST be concise.
-
-8. The expected answer MUST contain 2-4 sentences maximum.
-
-9. The expected answer MUST be less than 80 words.
-
-10. The expected answer must contain only the important concepts
-    that a strong candidate should mention.
-
-11. Do NOT include code in expected_answer.
-
-12. Do NOT include markdown in expected_answer.
-
-13. Do NOT include bullet points in expected_answer.
-
-14. Do NOT create multiple questions.
-
-15. Do NOT create multiple answers.
-
-16. Do NOT add explanations outside the JSON.
-
-17. Do NOT add "Here is your question".
-
-18. Do NOT use markdown code fences.
-
-19. Return ONLY valid JSON.
-
-20. JSON string values MUST NOT contain literal line breaks.
-
-21. Escape quotation marks correctly inside JSON strings.
-
-22. Keep expected_answer under 80 words.
-
-=====================================
-OUTPUT FORMAT
-=====================================
-
-Return exactly this JSON structure:
-
-{{
+    OUTPUT:
+    {{
     "question": "Short interview question",
-    "expected_answer": "Short technically correct answer in 2-4 sentences."
-}}
-"""
+    "expected_answer": "Short technically correct answer."
+    }}
+    """
 
     # =====================================================
     # CALL LLAMA
     # =====================================================
 
+    llm_start = time.perf_counter()
+
     try:
-        response = ask_llama(prompt)
+
+        response = ask_llama(prompt, 120)
 
     except Exception as error:
+
         print(
             "Llama question generation error:",
             error
@@ -290,11 +234,32 @@ Return exactly this JSON structure:
 
         response = None
 
+    llm_time = time.perf_counter() - llm_start
+
+    print(
+        f"Llama generation time: {llm_time:.2f} seconds"
+    )
+
     # =====================================================
     # FALLBACK
     # =====================================================
 
     if not response:
+
+        total_time = time.perf_counter() - total_start
+
+        print("\n========== PERFORMANCE ==========")
+        print(
+            f"RAG time: {rag_time:.2f} seconds"
+        )
+        print(
+            f"LLM time: {llm_time:.2f} seconds"
+        )
+        print(
+            f"Total time: {total_time:.2f} seconds"
+        )
+        print("=================================\n")
+
         return {
             "question": (
                 f"Explain an important {topic} concept "
@@ -319,6 +284,7 @@ Return exactly this JSON structure:
     expected_answer = ""
 
     try:
+
         response = response.strip()
 
         print(
@@ -362,29 +328,41 @@ Return exactly this JSON structure:
         end = response.rfind("}")
 
         if start == -1 or end == -1 or end <= start:
+
             raise ValueError(
                 "No valid JSON object found in LLM response"
             )
 
-        json_text = response[start:end + 1]
+        json_text = response[
+            start:end + 1
+        ]
 
         # -------------------------------------------------
         # PARSE JSON
         # -------------------------------------------------
 
-        data = json.loads(json_text)
+        data = json.loads(
+            json_text
+        )
 
         if not isinstance(data, dict):
+
             raise ValueError(
                 "LLM response is not a JSON object"
             )
 
         question = str(
-            data.get("question", "")
+            data.get(
+                "question",
+                ""
+            )
         ).strip()
 
         expected_answer = str(
-            data.get("expected_answer", "")
+            data.get(
+                "expected_answer",
+                ""
+            )
         ).strip()
 
         # -------------------------------------------------
@@ -392,6 +370,7 @@ Return exactly this JSON structure:
         # -------------------------------------------------
 
         if not question:
+
             raise ValueError(
                 "LLM returned an empty question"
             )
@@ -401,6 +380,7 @@ Return exactly this JSON structure:
         # -------------------------------------------------
 
         if not expected_answer:
+
             raise ValueError(
                 "LLM returned an empty expected answer"
             )
@@ -444,9 +424,11 @@ Return exactly this JSON structure:
     ]
 
     for prefix in prefixes:
+
         if question.lower().startswith(
             prefix.lower()
         ):
+
             question = question[
                 len(prefix):
             ].strip()
@@ -458,7 +440,7 @@ Return exactly this JSON structure:
         question
     ).strip()
 
-    # Remove accidental newlines from question
+    # Remove accidental newlines
     question = " ".join(
         question.split()
     ).strip()
@@ -486,6 +468,7 @@ Return exactly this JSON structure:
     words = expected_answer.split()
 
     if len(words) > 80:
+
         expected_answer = " ".join(
             words[:80]
         ).rstrip(".,;:") + "."
@@ -523,5 +506,23 @@ Return exactly this JSON structure:
     print(
         "==============================================="
     )
+
+    # =====================================================
+    # PERFORMANCE
+    # =====================================================
+
+    total_time = time.perf_counter() - total_start
+
+    print("\n========== PERFORMANCE ==========")
+    print(
+        f"RAG time: {rag_time:.2f} seconds"
+    )
+    print(
+        f"LLM time: {llm_time:.2f} seconds"
+    )
+    print(
+        f"Total time: {total_time:.2f} seconds"
+    )
+    print("=================================\n")
 
     return result

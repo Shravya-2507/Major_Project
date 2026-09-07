@@ -10,7 +10,7 @@ const BASE_URL =
 
 const api = axios.create({
   baseURL: BASE_URL,
-  timeout: 30000,
+  timeout: 120000,
   headers: {
     "Content-Type": "application/json",
   },
@@ -65,30 +65,17 @@ const handleResponse = async (res) => {
   }
 
   if (!res.ok) {
-    /*
-     * IMPORTANT:
-     * Preserve the complete backend error.
-     *
-     * Previously this only returned:
-     *
-     *   error.error
-     *
-     * which hid:
-     *
-     *   details
-     *   code
-     *   database_detail
-     */
-
     const message =
       data?.details ||
       data?.error ||
       data?.message ||
+      data?.detail ||
       `Request failed with status ${res.status}`;
 
     const error = new Error(message);
 
     error.status = res.status;
+
     error.response = {
       status: res.status,
       data,
@@ -217,7 +204,7 @@ export const fetchRoles = async (companyId) => {
 /**
  * Generate first interview question.
  *
- * Backend:
+ * Node backend:
  * POST /api/interview/questions
  */
 export const fetchQuestions = async (data = {}) => {
@@ -271,17 +258,15 @@ export const fetchQuestions = async (data = {}) => {
       "========== FIRST QUESTION RESPONSE =========="
     );
 
-    console.dir(
-      result,
-      { depth: null }
-    );
+    console.dir(result, {
+      depth: null,
+    });
 
     console.log(
       "=============================================="
     );
 
     return result;
-
   } catch (err) {
     console.error(
       "========== FETCH QUESTIONS ERROR =========="
@@ -313,8 +298,21 @@ export const fetchQuestions = async (data = {}) => {
 /**
  * Generate adaptive next question.
  *
- * Backend:
+ * Node backend:
  * POST /api/interview/next-question
+ *
+ * IMPORTANT:
+ * The Node controller expects:
+ * candidateId
+ * roleId
+ * companyId
+ * sessionId
+ * currentQuestionId
+ * currentAnswer
+ * topic
+ * history
+ * question_type
+ * category
  */
 export const getNextQuestion = async (
   data = {}
@@ -378,172 +376,33 @@ export const getNextQuestion = async (
   }
 };
 
-
 // =========================================
-// EVALUATE ONE ANSWER
-// =========================================
-
-export const evaluateAnswer = async (
-  question,
-  studentAnswer,
-  role = "General",
-  company = "General"
-) => {
-  const payload = {
-    question: String(question || "").trim(),
-    student_answer: String(studentAnswer || "").trim(),
-    role: String(role || "General").trim(),
-    company: String(company || "General").trim(),
-  };
-
-  console.log("========== POST /evaluate ==========");
-  console.log(payload);
-
-  const res = await fetch(
-    `${BASE_URL}/evaluate`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
-    }
-  );
-
-  return await handleResponse(res);
-};
-
-
-// =========================================
-// FINAL INTERVIEW EVALUATION
+// EVALUATE ONE INTERVIEW ANSWER
 // =========================================
 
-export const evaluateInterview = async ({
-  role = "General",
-  company = "General",
-  answers = [],
+export const evaluateInterviewAnswer = async ({
+  candidateId,
+  sessionId,
+  currentQuestionId,
+  currentAnswer,
+  roleId,
+  companyId,
 }) => {
-  if (!Array.isArray(answers) || answers.length === 0) {
-    throw new Error("No evaluated answers provided.");
-  }
-
-  const payload = {
-    role,
-    company,
-    answers,
-  };
-
-  console.log(
-    "========== POST /evaluate-interview =========="
-  );
-
-  console.dir(payload, { depth: null });
-
-  const res = await fetch(
-    `${BASE_URL}/evaluate-interview`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
-    }
-  );
-
-  const result = await handleResponse(res);
-
-  console.log(
-    "========== FINAL INTERVIEW REPORT =========="
-  );
-
-  console.dir(result, { depth: null });
-
-  return result;
-};
-
-
-// =========================================
-// BACKWARD COMPATIBILITY
-// =========================================
-
-export const evaluateInterviewAnswer = async (data) => {
-  return evaluateAnswer(
-    data.question,
-    data.student_answer,
-    data.role,
-    data.company
-  );
-};
-
-export const evaluateCompleteInterview = async (data) => {
-  return evaluateInterview(data);
-};
-
-
-
-/**
- * Submit / evaluate complete interview.
- *
- * IMPORTANT:
- * The backend evaluateInterview() expects:
- *
- * candidateId
- * sessionId
- * companyId
- * roleId
- * currentQuestionId
- * currentAnswer
- * testType
- * startedAt
- * answers
- */
-export const submitAnswers = async (
-  data = {}
-) => {
   try {
     const payload = {
-      candidateId:
-        data.candidateId ?? null,
-
-      sessionId:
-        data.sessionId ?? null,
-
-      roleId:
-        data.roleId ?? null,
-
-      companyId:
-        data.companyId ?? null,
-
-      currentQuestionId:
-        data.currentQuestionId ?? null,
-
-      currentAnswer:
-        data.currentAnswer ?? "",
-
-      testType:
-        data.testType || "interview",
-
-      startedAt:
-        data.startedAt ?? null,
-
-      answers:
-        Array.isArray(data.answers)
-          ? data.answers
-          : [],
+      candidateId,
+      sessionId,
+      currentQuestionId,
+      currentAnswer: String(currentAnswer || "").trim(),
+      roleId: roleId ?? null,
+      companyId: companyId ?? null,
     };
 
     console.log(
-      "========== SUBMITTING INTERVIEW =========="
+      "========== POST /api/interview/evaluate =========="
     );
 
-    console.dir(
-      payload,
-      { depth: null }
-    );
-
-    console.log(
-      "==========================================="
-    );
+    console.dir(payload, { depth: null });
 
     const res = await fetch(
       `${BASE_URL}/interview/evaluate`,
@@ -556,127 +415,83 @@ export const submitAnswers = async (
       }
     );
 
-    const result =
-      await handleResponse(res);
+    const result = await handleResponse(res);
 
     console.log(
-      "========== INTERVIEW SUBMIT RESPONSE =========="
+      "========== ANSWER EVALUATION RESPONSE =========="
     );
 
-    console.dir(
-      result,
-      { depth: null }
-    );
-
-    console.log(
-      "==============================================="
-    );
+    console.dir(result, { depth: null });
 
     return result;
-
   } catch (err) {
     console.error(
-      "Submit Answers Error:",
+      "Evaluate Interview Answer Error:",
       err.message
-    );
-
-    console.error(
-      "Status:",
-      err.status
-    );
-
-    console.error(
-      "Response:",
-      err.response?.data
     );
 
     throw err;
   }
 };
 
-// =========================================
-// GET INTERVIEW REPORT
-// =========================================
 
 // =========================================
-// GET INTERVIEW REPORT
+// FINAL INTERVIEW EVALUATION
 // =========================================
 
-export const getReport = async (
+export const evaluateInterview = async ({
   candidateId,
-  sessionId
-) => {
+  sessionId,
+  roleId,
+  companyId,
+  testType = "interview",
+  startedAt = null,
+}) => {
   try {
-    if (!candidateId) {
-      throw new Error("Candidate ID is required.");
-    }
-
-    let url =
-      `${BASE_URL}/interview/analyze/${candidateId}`;
-
-    if (sessionId) {
-      url += `?sessionId=${encodeURIComponent(sessionId)}`;
-    }
-
-    console.log("========== GETTING INTERVIEW REPORT ==========");
-    console.log({
+    const payload = {
       candidateId,
       sessionId,
-      url,
-    });
-
-    const res = await fetch(url);
-
-    const data = await handleResponse(res);
-
-    console.log("========== INTERVIEW REPORT RESPONSE ==========");
-    console.dir(data, { depth: null });
-
-    // Backend returns:
-    // {
-    //   success: true,
-    //   candidateId,
-    //   sessionId,
-    //   report: {...}
-    // }
-
-    if (!data || data.success === false) {
-      throw new Error(
-        data?.details ||
-        data?.error ||
-        "Failed to load interview report."
-      );
-    }
-
-    // Return the actual report object to Feedback.jsx
-    return {
-      ...data.report,
-
-      success: data.report?.success ?? data.success,
-
-      candidateId:
-        data.candidateId || candidateId,
-
-      sessionId:
-        data.sessionId || sessionId || "",
-
-      role:
-        data.report?.role || "General",
-
-      company:
-        data.report?.company || "General",
+      roleId: roleId ?? null,
+      companyId: companyId ?? null,
+      testType,
+      startedAt,
     };
 
+    console.log(
+      "========== POST /api/interview/evaluate-interview =========="
+    );
+
+    console.dir(payload, { depth: null });
+
+    const res = await fetch(
+      `${BASE_URL}/interview/evaluate-interview`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      }
+    );
+
+    const result = await handleResponse(res);
+
+    console.log(
+      "========== FINAL INTERVIEW REPORT =========="
+    );
+
+    console.dir(result, { depth: null });
+
+    return result;
   } catch (err) {
     console.error(
-      "Get Report Error:",
+      "Evaluate Complete Interview Error:",
       err.message
     );
 
     throw err;
   }
 };
-
 // =========================================
 // VTU QUESTIONS
 // =========================================
@@ -698,6 +513,7 @@ export const fetchVtuQuestions = async () => {
     throw err;
   }
 };
+
 
 // =========================================
 // RESUME ANALYSIS
@@ -731,7 +547,6 @@ export const analyzeResume = async (
       );
 
     return await handleResponse(res);
-
   } catch (err) {
     console.error(
       "Resume Analysis Error:",
@@ -755,7 +570,6 @@ export const fetchAdminDashboard =
         );
 
       return response.data;
-
     } catch (err) {
       console.error(
         "Fetch Admin Dashboard Error:",
@@ -775,7 +589,6 @@ export const fetchTopPerformers =
         );
 
       return response.data;
-
     } catch (err) {
       console.error(
         "Fetch Top Performers Error:",
@@ -795,7 +608,6 @@ export const fetchActivities =
         );
 
       return response.data;
-
     } catch (err) {
       console.error(
         "Fetch Activities Error:",
@@ -815,7 +627,6 @@ export const fetchBestSubject =
         );
 
       return response.data;
-
     } catch (err) {
       console.error(
         "Fetch Best Subject Error:",
@@ -835,7 +646,6 @@ export const fetchWeakestSubject =
         );
 
       return response.data;
-
     } catch (err) {
       console.error(
         "Fetch Weakest Subject Error:",
@@ -851,7 +661,6 @@ export const fetchWeakestSubject =
 // =========================================
 
 export const codingAPI = {
-
   getQuestions: async (
     candidateId = 1
   ) => {
@@ -859,15 +668,11 @@ export const codingAPI = {
       `active_coding_questions_${candidateId}`;
 
     const cached =
-      localStorage.getItem(
-        cacheKey
-      );
+      localStorage.getItem(cacheKey);
 
     if (cached) {
       try {
-        return JSON.parse(
-          cached
-        );
+        return JSON.parse(cached);
       } catch {
         localStorage.removeItem(
           cacheKey
@@ -885,9 +690,7 @@ export const codingAPI = {
 
     localStorage.setItem(
       cacheKey,
-      JSON.stringify(
-        questions
-      )
+      JSON.stringify(questions)
     );
 
     return questions;
@@ -922,19 +725,15 @@ export const codingAPI = {
             draftKey
           )
         ) || {};
-
     } catch {
       drafts = {};
     }
 
-    drafts[questionId] =
-      code;
+    drafts[questionId] = code;
 
     localStorage.setItem(
       draftKey,
-      JSON.stringify(
-        drafts
-      )
+      JSON.stringify(drafts)
     );
   },
 
@@ -953,11 +752,7 @@ export const codingAPI = {
           )
         ) || {};
 
-      return (
-        drafts[questionId] ||
-        ""
-      );
-
+      return drafts[questionId] || "";
     } catch {
       return "";
     }
@@ -980,16 +775,13 @@ export const codingAPI = {
           body: JSON.stringify({
             code,
             language,
-            language_id:
-              language,
+            language_id: language,
             input,
           }),
         }
       );
 
-    return await handleResponse(
-      res
-    );
+    return await handleResponse(res);
   },
 
   submitCode: async (
@@ -1004,9 +796,7 @@ export const codingAPI = {
             "Content-Type":
               "application/json",
           },
-          body: JSON.stringify(
-            payload
-          ),
+          body: JSON.stringify(payload),
         }
       );
 
@@ -1016,3 +806,109 @@ export const codingAPI = {
   },
 };
 
+
+// =========================================
+// BACKWARD COMPATIBILITY FOR Test.jsx
+// =========================================
+
+export const submitAnswers = async (data = {}) => {
+  return evaluateInterview({
+    candidateId: data.candidateId,
+    sessionId: data.sessionId,
+    roleId: data.roleId,
+    companyId: data.companyId,
+    testType: data.testType || "interview",
+    startedAt: data.startedAt || null,
+  });
+};
+
+// =========================================
+// GET INTERVIEW REPORT
+// =========================================
+
+export const getReport = async (
+  candidateId,
+  sessionId
+) => {
+  try {
+    if (!candidateId) {
+      throw new Error(
+        "Candidate ID is required."
+      );
+    }
+
+    let url =
+      `${BASE_URL}/interview/analyze/${candidateId}`;
+
+    if (sessionId) {
+      url += `?sessionId=${encodeURIComponent(sessionId)}`;
+    }
+
+    console.log(
+      "========== GETTING INTERVIEW REPORT =========="
+    );
+
+    console.log({
+      candidateId,
+      sessionId,
+      url,
+    });
+
+    const res = await fetch(url);
+
+    const data =
+      await handleResponse(res);
+
+    console.log(
+      "========== INTERVIEW REPORT RESPONSE =========="
+    );
+
+    console.dir(data, {
+      depth: null,
+    });
+
+    if (
+      !data ||
+      data.success === false
+    ) {
+      throw new Error(
+        data?.details ||
+        data?.error ||
+        "Failed to load interview report."
+      );
+    }
+
+    return {
+      ...data.report,
+
+      success:
+        data.report?.success ??
+        data.success,
+
+      candidateId:
+        data.candidateId ??
+        candidateId,
+
+      sessionId:
+        data.sessionId ??
+        sessionId ??
+        "",
+
+      role:
+        data.report?.role ||
+        "General",
+
+      company:
+        data.report?.company ||
+        "General",
+    };
+
+  } catch (err) {
+    console.error(
+      "Get Report Error:",
+      err.message
+    );
+
+    throw err;
+  }
+};
