@@ -20,10 +20,10 @@ export default function CodingTest() {
     return {};
   });
 
-  const [passedMap, setPassedMap] = useState({});
   const [attemptedMap, setAttemptedMap] = useState({});
 
   const [language, setLanguage] = useState("javascript");
+  const [supportedLanguages, setSupportedLanguages] = useState([]);
   const [customInput, setCustomInput] = useState("");
   const [output, setOutput] = useState("");
   const [results, setResults] = useState(null);
@@ -48,6 +48,21 @@ export default function CodingTest() {
 
   const navigate = useNavigate();
 
+  useEffect(() => {
+    codingAPI.getLanguages()
+      .then((languages) => {
+        setSupportedLanguages(Array.isArray(languages) ? languages : []);
+
+        if (Array.isArray(languages) && languages.length > 0) {
+          setLanguage(languages[0].id);
+        }
+      })
+      .catch((error) => {
+        console.error("Could not load coding languages:", error);
+        setSupportedLanguages([]);
+      });
+  }, []);
+
   /*
    * ==========================================================
    * LOAD CODING QUESTIONS & START TEST SESSION
@@ -59,27 +74,17 @@ export default function CodingTest() {
         setQuestionsLoading(true);
         setQuestionsError("");
 
-        const [nextRes, subsRes] = await Promise.all([
+        const nextRes = await (
           codingAPI.get
             ? codingAPI.get("/code/next?candidateId=1")
             : fetch(
                 "http://localhost:5000/api/code/next?candidateId=1"
-              ).then((r) => r.json()),
-
-          codingAPI.get
-            ? codingAPI.get("/code/submissions?candidateId=1")
-            : fetch(
-                "http://localhost:5000/api/code/submissions?candidateId=1"
-              ).then((r) => r.json()),
-        ]);
+              ).then((r) => r.json())
+        );
 
         const questionRows = Array.isArray(nextRes)
           ? nextRes
           : nextRes?.data || nextRes?.rows || [];
-
-        const submissionRows = Array.isArray(subsRes)
-          ? subsRes
-          : subsRes?.data || subsRes?.rows || [];
 
         if (questionRows.length === 0) {
           setQuestionsError(
@@ -106,20 +111,6 @@ export default function CodingTest() {
         } catch (startErr) {
           console.warn("Could not auto-start test session via API, will rely on submission creation:", startErr);
         }
-
-        const initialPassedMap = {};
-
-        submissionRows.forEach((sub) => {
-          if (
-            sub.status === "ACCEPTED" ||
-            sub.status === "AC" ||
-            Number(sub.score) === 100
-          ) {
-            initialPassedMap[sub.question_id] = true;
-          }
-        });
-
-        setPassedMap(initialPassedMap);
 
         setQuestions(questionRows);
         setCurrentIndex(0);
@@ -310,12 +301,7 @@ export default function CodingTest() {
       return;
     }
 
-    const allTestCases = [
-      ...sampleTestCases,
-      ...hiddenTestCases,
-    ];
-
-    if (allTestCases.length === 0) {
+    if (sampleTestCases.length === 0 && hiddenTestCases.length === 0) {
       alert("No test cases found for this question.");
       return;
     }
@@ -329,7 +315,6 @@ export default function CodingTest() {
         code,
         language_id: language,
         questionId: currentQuestionId,
-        testCases: allTestCases,
         candidateId: 1,
         attemptId: attemptId || null,
       };
@@ -347,12 +332,6 @@ export default function CodingTest() {
         setAttemptId(res.attemptId);
       }
 
-      if (res?.success) {
-        setPassedMap((prev) => ({
-          ...prev,
-          [currentQuestionId]: true,
-        }));
-      }
     } catch (err) {
       console.error("Submit error:", err);
 
@@ -441,22 +420,12 @@ export default function CodingTest() {
       Number(finalScore) || 0
     );
 
-    const correctCount = questions.filter((q) => {
-      const res = submissionResults[q.id];
-      return res?.status === "ACCEPTED" || res?.success;
-    }).length;
-
     // SYNC FINAL SCORE TO BACKEND DATABASE
     if (attemptId) {
       try {
-        await codingAPI.submitCode({
+        await codingAPI.endTest({
           candidateId: 1,
           attemptId: attemptId,
-          isFinalSync: true,
-          finalScore: finalScore,
-          correctAnswers: correctCount,
-          totalQuestions: totalQuestions,
-          submissions: [] // Empty submissions array just to trigger final database status sync if backend handles it
         });
       } catch (err) {
         console.error("Failed to sync final test score to backend:", err);
@@ -668,8 +637,11 @@ export default function CodingTest() {
               value={language}
               onChange={(e) => setLanguage(e.target.value)}
             >
-              <option value="javascript">JavaScript</option>
-              <option value="python">Python</option>
+              {supportedLanguages.map((item) => (
+                <option key={item.id} value={item.id} disabled={!item.available}>
+                  {item.name}{item.available ? "" : " (compiler unavailable)"}
+                </option>
+              ))}
             </select>
           </div>
           <button
@@ -726,7 +698,7 @@ export default function CodingTest() {
             {results && (
               <div>
                 <p className={`text-lg font-bold mb-2 ${results.success ? "text-green-400" : "text-red-400"}`}>
-                  Result: {results.success ? "ACCEPTED" : "FAILED"}
+                  Result: {results.status || (results.success ? "ACCEPTED" : "FAILED")}
                 </p>
                 {results.score !== undefined && (
                   <p className="text-blue-400 font-bold mb-2">Score: {results.score} / 100</p>

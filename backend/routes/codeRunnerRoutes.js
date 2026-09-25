@@ -4,8 +4,15 @@ import {
   executeCode,
   runTestCases,
 } from "../services/evaluationService.js";
+import { getAllLanguages } from "../services/languageRegistry.js";
+import { authenticate } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
+router.use(authenticate);
+
+router.get("/languages", (req, res) => {
+  return res.json(getAllLanguages());
+});
 
 /* ==========================================================
    START CODING TEST
@@ -13,7 +20,7 @@ const router = express.Router();
 ========================================================== */
 router.post("/start", async (req, res) => {
   try {
-    const candidateId = Number(req.body.candidateId || 1);
+    const candidateId = Number(req.user?.id);
     const companyId = req.body.companyId
       ? Number(req.body.companyId)
       : null;
@@ -73,7 +80,7 @@ router.post("/start", async (req, res) => {
 ========================================================== */
 router.get("/next", async (req, res) => {
   try {
-    const candidateId = Number(req.query.candidateId || 1);
+    const candidateId = Number(req.user?.id);
 
     // Find questions already solved successfully
     const solvedRes = await pool.query(
@@ -114,8 +121,7 @@ router.get("/next", async (req, res) => {
           tags,
           "sampleInput",
           "sampleOutput",
-          "sampleTestCases",
-          "hiddenTestCases"
+          "sampleTestCases"
         FROM "CodingQuestion"
         WHERE difficulty = $1
       `;
@@ -151,8 +157,7 @@ router.get("/next", async (req, res) => {
           tags,
           "sampleInput",
           "sampleOutput",
-          "sampleTestCases",
-          "hiddenTestCases"
+          "sampleTestCases"
         FROM "CodingQuestion"
         WHERE 1=1
       `;
@@ -275,11 +280,10 @@ router.post("/submit", async (req, res) => {
   const {
     code,
     language_id,
-    testCases = [],
     questionId,
-    candidateId = 1,
     attemptId,
   } = req.body;
+  const candidateId = Number(req.user?.id);
 
   if (!code || !language_id || !questionId) {
     return res.status(400).json({
@@ -292,16 +296,6 @@ router.post("/submit", async (req, res) => {
     return res.status(400).json({
       error:
         "attemptId is required. Start the coding test first.",
-    });
-  }
-
-  if (
-    !Array.isArray(testCases) ||
-    testCases.length === 0
-  ) {
-    return res.status(400).json({
-      error:
-        "No test cases found for this submission",
     });
   }
 
@@ -328,11 +322,50 @@ router.post("/submit", async (req, res) => {
       });
     }
 
+    const questionResult = await pool.query(
+      `
+      SELECT "sampleTestCases", "hiddenTestCases"
+      FROM "CodingQuestion"
+      WHERE id = $1
+      `,
+      [Number(questionId)]
+    );
+
+    if (questionResult.rows.length === 0) {
+      return res.status(404).json({
+        error: "Coding question not found",
+      });
+    }
+
+    const parseTestCases = (value) => {
+      if (Array.isArray(value)) return value;
+      if (typeof value !== "string") return [];
+
+      try {
+        const parsed = JSON.parse(value);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    };
+
+    const question = questionResult.rows[0];
+    const authoritativeTestCases = [
+      ...parseTestCases(question.sampleTestCases),
+      ...parseTestCases(question.hiddenTestCases),
+    ];
+
+    if (authoritativeTestCases.length === 0) {
+      return res.status(400).json({
+        error: "No test cases found for this question",
+      });
+    }
+
     // Execute all test cases
     const results = await runTestCases(
       code,
       language_id,
-      testCases
+      authoritativeTestCases
     );
 
     const passedTests = results.filter(
@@ -347,7 +380,17 @@ router.post("/submit", async (req, res) => {
 
     const status = success
       ? "ACCEPTED"
-      : "FAILED";
+      : results.some((result) => result.status === "Compilation Error")
+      ? "COMPILATION_ERROR"
+      : results.some((result) => result.status === "Time Limit Exceeded")
+      ? "TIME_LIMIT_EXCEEDED"
+      : results.some((result) => result.status === "Runtime Error")
+      ? "RUNTIME_ERROR"
+      : "WRONG_ANSWER";
+
+    // Keep the existing database constraint compatible while returning the
+    // detailed evaluation status to the frontend.
+    const storedStatus = success ? "ACCEPTED" : "FAILED";
 
     const score =
       totalTests > 0
@@ -391,7 +434,7 @@ router.post("/submit", async (req, res) => {
         Number(questionId),
         Number(attemptId),
         String(language_id),
-        status,
+        storedStatus,
         passedTests,
         totalTests,
         score,
@@ -432,9 +475,9 @@ router.post("/submit", async (req, res) => {
 ========================================================== */
 router.post("/end", async (req, res) => {
   const {
-    candidateId = 1,
     attemptId,
   } = req.body;
+  const candidateId = Number(req.user?.id);
 
   if (!attemptId) {
     return res.status(400).json({
@@ -644,8 +687,7 @@ router.post("/end", async (req, res) => {
 ========================================================== */
 router.get("/submissions", async (req, res) => {
   try {
-    const candidateId =
-      Number(req.query.candidateId || 1);
+    const candidateId = Number(req.user?.id);
 
     const attemptId = req.query.attemptId
       ? Number(req.query.attemptId)

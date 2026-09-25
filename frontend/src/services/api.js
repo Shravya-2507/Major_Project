@@ -661,6 +661,26 @@ export const fetchWeakestSubject =
 // =========================================
 
 export const codingAPI = {
+  get: async (path) => {
+    const response = await api.get(path);
+    return response.data;
+  },
+
+  getLanguages: async () => {
+    const response = await api.get("/code/languages");
+    return response.data;
+  },
+
+  startTest: async (payload) => {
+    const response = await api.post("/code/start", payload);
+    return response.data;
+  },
+
+  endTest: async (payload) => {
+    const response = await api.post("/code/end", payload);
+    return response.data;
+  },
+
   getQuestions: async (
     candidateId = 1
   ) => {
@@ -763,46 +783,22 @@ export const codingAPI = {
     language,
     input = ""
   ) => {
-    const res =
-      await fetch(
-        `${BASE_URL}/code/run`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type":
-              "application/json",
-          },
-          body: JSON.stringify({
-            code,
-            language,
-            language_id: language,
-            input,
-          }),
-        }
-      );
+    const response = await api.post("/code/run", {
+      code,
+      language,
+      language_id: language,
+      input,
+    });
 
-    return await handleResponse(res);
+    return response.data;
   },
 
   submitCode: async (
     payload
   ) => {
-    const response =
-      await fetch(
-        `${BASE_URL}/code/submit`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type":
-              "application/json",
-          },
-          body: JSON.stringify(payload),
-        }
-      );
+    const response = await api.post("/code/submit", payload);
 
-    return await handleResponse(
-      response
-    );
+    return response.data;
   },
 };
 
