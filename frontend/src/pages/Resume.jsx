@@ -1,5 +1,6 @@
 import { useState } from "react";
 import axios from "axios";
+import { generateJobDescription } from "../services/api";
 
 export default function ResumeAnalyzer() {
   const roles = [
@@ -31,8 +32,37 @@ export default function ResumeAnalyzer() {
   const [role, setRole] = useState("");
   const [jd, setJd] = useState("");
   const [loading, setLoading] = useState(false);
+  const [generatingJd, setGeneratingJd] = useState(false);
   const [result, setResult] = useState(null);
   const [meta, setMeta] = useState(null);
+
+  const handleGenerateJobDescription = async () => {
+    if (!role) {
+      alert("Please select target role first");
+      return;
+    }
+
+    setGeneratingJd(true);
+
+    try {
+      const data = await generateJobDescription(role);
+
+      if (!data?.jobDescription?.trim()) {
+        throw new Error("The generated job description was empty");
+      }
+
+      setJd(data.jobDescription);
+    } catch (error) {
+      console.error("Job description generation failed:", error);
+      alert(
+        error.response?.data?.error ||
+          error.message ||
+          "Unable to generate a job description"
+      );
+    } finally {
+      setGeneratingJd(false);
+    }
+  };
 
   const handleAnalyze = async () => {
     if (!file) {
@@ -124,10 +154,27 @@ export default function ResumeAnalyzer() {
 
         {/* JD */}
         <div>
-          <label className="block mb-2 font-semibold text-gray-700">
-            Job Description
-            <span className="text-red-500 ml-1">*</span>
-          </label>
+          <div className="flex items-center justify-between gap-4 mb-2">
+            <label className="block font-semibold text-gray-700">
+              Job Description
+              <span className="text-red-500 ml-1">*</span>
+            </label>
+
+            <button
+              type="button"
+              onClick={handleGenerateJobDescription}
+              disabled={generatingJd}
+              className={`px-4 py-2 rounded-lg text-sm font-semibold text-white transition ${
+                generatingJd
+                  ? "bg-gray-400 cursor-not-allowed"
+                  : "bg-purple-600 hover:bg-purple-700"
+              }`}
+            >
+              {generatingJd
+                ? "Generating Job Description..."
+                : "Generate Job Description"}
+            </button>
+          </div>
 
           <textarea
             rows="7"

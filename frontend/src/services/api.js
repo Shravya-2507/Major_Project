@@ -519,6 +519,11 @@ export const fetchVtuQuestions = async () => {
 // RESUME ANALYSIS
 // =========================================
 
+export const generateJobDescription = async (role) => {
+  const response = await api.post("/resume/generate-jd", { role });
+  return response.data;
+};
+
 export const analyzeResume = async (
   file,
   role = ""

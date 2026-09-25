@@ -1,5 +1,6 @@
 import ollama
 import time
+from typing import Optional
 
 
 MODEL_NAME = "llama3.2:3b"
@@ -7,24 +8,23 @@ MODEL_NAME = "llama3.2:3b"
 
 def ask_llama(
     prompt: str,
-    max_tokens: int = 120
+    max_tokens: int = 120,
+    response_format: Optional[str] = "json"
 ):
     try:
         start_time = time.perf_counter()
 
-        response = ollama.chat(
-            model=MODEL_NAME,
+        chat_options = {
+            "model": MODEL_NAME,
 
-            messages=[
+            "messages": [
                 {
                     "role": "user",
                     "content": prompt
                 }
             ],
 
-            format="json",
-
-            options={
+            "options": {
                 "temperature": 0,
                 "num_predict": max_tokens,
                 "num_ctx": 1024,
@@ -32,7 +32,14 @@ def ask_llama(
                 "num_thread": 6,
             },
 
-            keep_alive="30m",
+            "keep_alive": "30m",
+        }
+
+        if response_format:
+            chat_options["format"] = response_format
+
+        response = ollama.chat(
+            **chat_options
         )
 
         total_time = time.perf_counter() - start_time

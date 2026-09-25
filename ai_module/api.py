@@ -13,6 +13,7 @@ from resume.experience_analyzer import analyze_experience
 from resume.project_analyzer import analyze_projects
 from resume.achievement_analyzer import analyze_achievements
 from resume.feedback_generator import generate_feedback
+from resume.job_description_generator import generate_job_description
 
 from interview.question_generator import generate_question
 from interview.interview_feedback import generate_interview_report
@@ -78,6 +79,10 @@ class ResumeRequest(BaseModel):
     text: str
     role: str = "General"
     job_description: Optional[str] = None
+
+
+class JobDescriptionRequest(BaseModel):
+    role: str
 
 
 class QuestionGenerationRequest(BaseModel):
@@ -516,6 +521,7 @@ async def analyze_resume(
 
         }
 
+
     except Exception as e:
 
         logging.error(
@@ -533,6 +539,43 @@ async def analyze_resume(
                 "Resume analysis failed."
 
         }
+
+
+@app.post("/generate-job-description")
+def generate_job_description_endpoint(req: JobDescriptionRequest):
+
+    role = (req.role or "").strip()
+
+    if not role:
+        raise HTTPException(
+            status_code=400,
+            detail="A target role is required."
+        )
+
+    try:
+        job_description = generate_job_description(role)
+
+        if not isinstance(job_description, str) or not job_description.strip():
+            raise ValueError("The AI service returned an invalid job description")
+
+        return {
+            "success": True,
+            "role": role,
+            "job_description": job_description.strip()
+        }
+
+    except HTTPException:
+        raise
+    except Exception as error:
+        logging.error(
+            "Job description generation failed: %s",
+            error,
+            exc_info=True
+        )
+        raise HTTPException(
+            status_code=502,
+            detail="Unable to generate a job description right now."
+        )
 
 
 # =========================================================
