@@ -1205,11 +1205,9 @@ export const evaluateSingleAnswer = async (req, res) => {
 // =====================================================
 // FINISH INTERVIEW
 // =====================================================
-// =====================================================
-// FINISH INTERVIEW
-// =====================================================
 
 export const evaluateInterview = async (req, res) => {
+  console.log("🔥 EXPRESS evaluateInterview HIT");
   try {
     const {
       candidateId,
@@ -1221,7 +1219,7 @@ export const evaluateInterview = async (req, res) => {
     } = req.body;
 
     console.log(
-      "========== FINISHING INTERVIEW =========="
+      "\n========== FINISHING INTERVIEW =========="
     );
 
     console.log({
@@ -1233,9 +1231,9 @@ export const evaluateInterview = async (req, res) => {
       startedAt,
     });
 
-    // =================================================
+    // =====================================================
     // VALIDATION
-    // =================================================
+    // =====================================================
 
     if (!candidateId) {
       return res.status(400).json({
@@ -1251,9 +1249,9 @@ export const evaluateInterview = async (req, res) => {
       });
     }
 
-    // =================================================
+    // =====================================================
     // GET ALL SAVED ANSWERS
-    // =================================================
+    // =====================================================
 
     const answersResult = await pool.query(
       `
@@ -1266,15 +1264,25 @@ export const evaluateInterview = async (req, res) => {
         smith_waterman_score,
         final_score,
         ai_feedback
-      FROM answers
+      FROM public.answers
       WHERE candidate_id = $1
-      AND session_id = $2
+        AND session_id = $2
       ORDER BY id ASC
       `,
       [candidateId, sessionId]
     );
 
     const answers = answersResult.rows;
+
+    console.log(
+      "========== SAVED ANSWERS FOUND =========="
+    );
+
+    console.log({
+      candidateId,
+      sessionId,
+      answerCount: answers.length,
+    });
 
     if (answers.length === 0) {
       return res.status(400).json({
@@ -1283,12 +1291,12 @@ export const evaluateInterview = async (req, res) => {
       });
     }
 
-    // =================================================
+    // =====================================================
     // CALCULATE OVERALL SCORE
-    // =================================================
+    // =====================================================
 
-    const scores = answers.map(
-      (answer) => Number(answer.final_score ?? 0)
+    const scores = answers.map((answer) =>
+      Number(answer.final_score ?? 0)
     );
 
     const totalScore = scores.reduce(
@@ -1299,10 +1307,10 @@ export const evaluateInterview = async (req, res) => {
     const overallScore =
       totalScore / answers.length;
 
-    // =================================================
+    // =====================================================
     // CALCULATE CORRECT ANSWERS
     // SCORE > 50 = CORRECT
-    // =================================================
+    // =====================================================
 
     const correctAnswers = scores.filter(
       (score) => score > 50
@@ -1310,38 +1318,41 @@ export const evaluateInterview = async (req, res) => {
 
     const totalQuestions = answers.length;
 
-    // =================================================
+    // =====================================================
     // CALCULATE COMPLETION TIME
-    // =================================================
+    // =====================================================
 
     const completedAt = new Date();
 
-    const startTime = startedAt
-      ? new Date(startedAt)
-      : null;
+    let startTime = null;
+    let validStartTime = false;
 
-    const validStartTime =
-      startTime &&
-      !Number.isNaN(startTime.getTime());
+    if (startedAt) {
+      const parsedStartTime = new Date(startedAt);
+
+      if (!Number.isNaN(parsedStartTime.getTime())) {
+        startTime = parsedStartTime;
+        validStartTime = true;
+      }
+    }
 
     const durationMinutes = validStartTime
       ? Math.max(
           1,
           Math.ceil(
-            (
-              completedAt.getTime() -
-              startTime.getTime()
-            ) / 60000
+            (completedAt.getTime() -
+              startTime.getTime()) /
+              60000
           )
         )
       : null;
 
-    // =================================================
-    // DEBUG
-    // =================================================
+    // =====================================================
+    // FINAL SCORE DEBUG
+    // =====================================================
 
     console.log(
-      "========== FINAL INTERVIEW SCORE =========="
+      "\n========== FINAL INTERVIEW SCORE =========="
     );
 
     console.log({
@@ -1362,26 +1373,56 @@ export const evaluateInterview = async (req, res) => {
       "============================================"
     );
 
+    // =====================================================
+    // NORMALIZE COMPANY ID
+    // =====================================================
 
-    console.log("========== SAVING TEST ATTEMPT ==========");
-console.log({
-  candidateId,
-  companyId,
-  testType,
-  score: Number(overallScore.toFixed(2)),
-  totalQuestions,
-  correctAnswers,
-  startedAt: validStartTime ? startTime : null,
-  completedAt,
-  durationMinutes,
-});
-    // =================================================
+    const normalizedCompanyId =
+      companyId !== null &&
+      companyId !== undefined &&
+      companyId !== ""
+        ? Number(companyId)
+        : null;
+
+    if (
+      normalizedCompanyId !== null &&
+      Number.isNaN(normalizedCompanyId)
+    ) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid companyId",
+      });
+    }
+
+    // =====================================================
     // SAVE TEST ATTEMPT
-    // =================================================
+    // =====================================================
+
+    const finalScore = Number(
+      overallScore.toFixed(2)
+    );
+
+    console.log(
+      "\n========== SAVING TEST ATTEMPT =========="
+    );
+
+    console.log({
+      candidateId,
+      companyId: normalizedCompanyId,
+      testType,
+      score: finalScore,
+      totalQuestions,
+      correctAnswers,
+      startedAt: validStartTime
+        ? startTime
+        : null,
+      completedAt,
+      durationMinutes,
+    });
 
     const attemptResult = await pool.query(
       `
-      INSERT INTO test_attempts
+      INSERT INTO public.test_attempts
       (
         candidate_id,
         company_id,
@@ -1393,7 +1434,8 @@ console.log({
         completed_at,
         duration_minutes
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      VALUES
+      ($1, $2, $3, $4, $5, $6, $7, $8, $9)
       RETURNING
         attempt_id,
         candidate_id,
@@ -1408,9 +1450,9 @@ console.log({
       `,
       [
         candidateId,
-        companyId || null,
+        normalizedCompanyId,
         testType,
-        Number(overallScore.toFixed(2)),
+        finalScore,
         totalQuestions,
         correctAnswers,
         validStartTime
@@ -1425,7 +1467,7 @@ console.log({
       attemptResult.rows[0];
 
     console.log(
-      "========== TEST ATTEMPT SAVED =========="
+      "\n========== TEST ATTEMPT SAVED =========="
     );
 
     console.dir(
@@ -1437,17 +1479,16 @@ console.log({
       "========================================"
     );
 
-    // =================================================
-    // RESPONSE
-    // =================================================
+    // =====================================================
+    // RETURN SUCCESS
+    // =====================================================
 
-    return res.json({
+    return res.status(200).json({
       success: true,
 
-      score:
-        Number(
-          overallScore.toFixed(2)
-        ),
+      score: finalScore,
+
+      overallScore: finalScore,
 
       totalQuestions,
 
@@ -1463,7 +1504,7 @@ console.log({
 
   } catch (error) {
     console.error(
-      "========== EVALUATE INTERVIEW ERROR =========="
+      "\n========== EVALUATE INTERVIEW ERROR =========="
     );
 
     console.error(
@@ -1482,6 +1523,26 @@ console.log({
     );
 
     console.error(
+      "Constraint:",
+      error?.constraint
+    );
+
+    console.error(
+      "Table:",
+      error?.table
+    );
+
+    console.error(
+      "Column:",
+      error?.column
+    );
+
+    console.error(
+      "Where:",
+      error?.where
+    );
+
+    console.error(
       "Stack:",
       error?.stack
     );
@@ -1492,14 +1553,14 @@ console.log({
 
     return res.status(500).json({
       success: false,
-      error:
-        "Failed to complete interview",
+      error: "Failed to complete interview",
       details:
         error?.message ||
         "Unknown server error",
     });
   }
 };
+
 // =====================================================
 // GENERATE DETAILED INTERVIEW REPORT
 // =====================================================
