@@ -26,6 +26,11 @@ export const getWeeklyLeaderboard = async () => {
 
 // ================= Candidate =================
 
+export const getCandidates = async () => {
+  const { data } = await api.get("/admin/candidates");
+  return data.data || [];
+};
+
 export const getCandidateProfile = async (id) => {
   const { data } = await api.get(`/admin/candidate/${id}`);
   return data.data;

@@ -75,6 +75,18 @@ export const getActiveUsers = async () => {
   return rows[0];
 };
 
+export const getCandidates = async () => {
+  const query = `
+    SELECT id, name, email
+    FROM candidates
+    ORDER BY name ASC, id ASC;
+  `;
+
+  const { rows } = await pool.query(query);
+
+  return rows;
+};
+
 /*
 ====================================
 Leaderboards

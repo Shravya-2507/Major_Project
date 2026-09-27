@@ -1,6 +1,7 @@
 import express from "express";
 import {
   getDashboardStats,
+  getCandidates,
   getOverallLeaderboard,
   getMonthlyLeaderboard,
   getWeeklyLeaderboard,
@@ -19,6 +20,7 @@ const router = express.Router();
 router.use(authenticate, authorizeAdmin);
 
 router.get("/dashboard", getDashboardStats);
+router.get("/candidates", getCandidates);
 router.get("/leaderboard/overall", getOverallLeaderboard);
 router.get("/leaderboard/monthly", getMonthlyLeaderboard);
 router.get("/leaderboard/weekly", getWeeklyLeaderboard);
