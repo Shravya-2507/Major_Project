@@ -1,6 +1,7 @@
 import jwt from "jsonwebtoken";
 
-const SECRET = process.env.JWT_SECRET;
+const SECRET =
+  process.env.JWT_SECRET || "major_project_secret";
 
 export const authenticate = (req, res, next) => {
   try {

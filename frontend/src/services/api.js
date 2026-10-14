@@ -813,14 +813,15 @@ export const codingAPI = {
 // =========================================
 
 export const submitAnswers = async (data = {}) => {
-  return evaluateInterview({
-    candidateId: data.candidateId,
-    sessionId: data.sessionId,
-    roleId: data.roleId,
-    companyId: data.companyId,
-    testType: data.testType || "interview",
-    startedAt: data.startedAt || null,
+  const res = await fetch(`${BASE_URL}/vtu-answers`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(data),
   });
+
+  return await handleResponse(res);
 };
 
 // =========================================
@@ -911,5 +912,33 @@ export const getReport = async (
     );
 
     throw err;
+  }
+};
+
+// =========================================
+// AUDIO TRANSCRIPTION (WHISPER)
+// Used by VTU Modules and Interview only
+// =========================================
+
+export const transcribeAudio = async (audioBlob) => {
+  try {
+    const formData = new FormData();
+
+    formData.append("audio", audioBlob, "recording.webm");
+
+    const response = await fetch(
+      `${BASE_URL}/transcribe-audio`,
+      {
+        method: "POST",
+        body: formData,
+      }
+    );
+
+    const result = await handleResponse(response);
+
+    return result.transcript || "";
+  } catch (error) {
+    console.error("Audio Transcription Error:", error.message);
+    throw error;
   }
 };

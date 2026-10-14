@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-
 import {
   fetchQuestions,
   getNextQuestion,
   evaluateInterviewAnswer,
   evaluateInterview,
+  transcribeAudio,
 } from "../services/api";
 
 const TOTAL_QUESTIONS = 5;
@@ -56,6 +56,15 @@ export default function Interview() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
 
+  //AUDIO STATE
+  const [isRecording, setIsRecording] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const [audioBlob, setAudioBlob] = useState(null);
+
+  const mediaRecorderRef = useRef(null);
+  const audioChunksRef = useRef([]);
+  const streamRef = useRef(null);
+
   // =====================================================
   // GET CURRENT USER
   // =====================================================
@@ -68,11 +77,7 @@ export default function Interview() {
         ? JSON.parse(savedUser)
         : null;
     } catch (error) {
-      console.error(
-        "Failed to parse user:",
-        error
-      );
-
+      console.error("Failed to parse user:", error);
       return null;
     }
   };
@@ -98,25 +103,16 @@ export default function Interview() {
         setLoading(true);
         setErrorMessage("");
 
-        // =================================================
-        // RESTORE INTERVIEW CONFIG
-        // =================================================
-
         const savedInterview =
-          sessionStorage.getItem(
-            "current_interview"
-          );
+          sessionStorage.getItem("current_interview");
 
         let storedInterview = {};
 
         if (savedInterview) {
           try {
-            storedInterview =
-              JSON.parse(savedInterview);
+            storedInterview = JSON.parse(savedInterview);
           } catch {
-            sessionStorage.removeItem(
-              "current_interview"
-            );
+            sessionStorage.removeItem("current_interview");
           }
         }
 
@@ -160,10 +156,7 @@ export default function Interview() {
             "current_interview_history"
           );
 
-        if (
-          savedQuestions &&
-          savedSessionId
-        ) {
+        if (savedQuestions && savedSessionId) {
           try {
             const parsedQuestions =
               JSON.parse(savedQuestions);
@@ -173,13 +166,10 @@ export default function Interview() {
               parsedQuestions.length > 0
             ) {
               setQuestions(parsedQuestions);
-
               setSessionId(savedSessionId);
 
               if (savedAnswers) {
-                setAnswers(
-                  JSON.parse(savedAnswers)
-                );
+                setAnswers(JSON.parse(savedAnswers));
               }
 
               if (savedEvaluations) {
@@ -189,15 +179,12 @@ export default function Interview() {
               }
 
               if (savedHistory) {
-                setHistory(
-                  JSON.parse(savedHistory)
-                );
+                setHistory(JSON.parse(savedHistory));
               }
 
-              const parsedAnswers =
-                savedAnswers
-                  ? JSON.parse(savedAnswers)
-                  : {};
+              const parsedAnswers = savedAnswers
+                ? JSON.parse(savedAnswers)
+                : {};
 
               const unansweredIndex =
                 parsedQuestions.findIndex(
@@ -249,9 +236,7 @@ export default function Interview() {
         // =================================================
 
         const user = getCurrentUser();
-
-        const candidateId =
-          user?.id || null;
+        const candidateId = user?.id || null;
 
         if (!candidateId) {
           throw new Error(
@@ -263,16 +248,11 @@ export default function Interview() {
         // START TIME
         // =================================================
 
-        if (
-          !sessionStorage.getItem(
-            "current_interview_started_at"
-          )
-        ) {
-          sessionStorage.setItem(
-            "current_interview_started_at",
-            new Date().toISOString()
-          );
-        }
+        // New interview = new start time
+        sessionStorage.setItem(
+          "current_interview_started_at",
+          new Date().toISOString()
+        );
 
         // =================================================
         // GENERATE FIRST QUESTION
@@ -282,30 +262,24 @@ export default function Interview() {
           "========== FIRST QUESTION =========="
         );
 
-        const data =
-          await fetchQuestions({
-            roleId: Number(roleId),
+        const data = await fetchQuestions({
+          roleId: Number(roleId),
 
-            companyId:
-              companyId
-                ? Number(companyId)
-                : null,
+          companyId:
+            companyId
+              ? Number(companyId)
+              : null,
 
-            topic: requestTopic,
+          topic: requestTopic,
 
-            question_type:
-              requestQuestionType,
+          question_type: requestQuestionType,
 
-            category:
-              requestCategory,
+          category: requestCategory,
 
-            candidateId,
-          });
+          candidateId,
+        });
 
-        console.log(
-          "First question:",
-          data
-        );
+        console.log("First question:", data);
 
         if (
           !data ||
@@ -319,11 +293,8 @@ export default function Interview() {
           );
         }
 
-        const firstQuestion =
-          data.question;
+        const firstQuestion = data.question;
 
-        // IMPORTANT:
-        // First question MUST contain DB ID
         console.log(
           "FIRST QUESTION OBJECT:",
           firstQuestion
@@ -338,8 +309,7 @@ export default function Interview() {
           );
         }
 
-        const newSessionId =
-          data.sessionId;
+        const newSessionId = data.sessionId;
 
         if (!newSessionId) {
           throw new Error(
@@ -347,12 +317,8 @@ export default function Interview() {
           );
         }
 
-        setQuestions([
-          firstQuestion,
-        ]);
-
+        setQuestions([firstQuestion]);
         setSessionId(newSessionId);
-
         setCurrentIndex(0);
 
         setAnswers({});
@@ -365,9 +331,7 @@ export default function Interview() {
 
         sessionStorage.setItem(
           "current_interview_questions",
-          JSON.stringify([
-            firstQuestion,
-          ])
+          JSON.stringify([firstQuestion])
         );
 
         sessionStorage.setItem(
@@ -404,16 +368,13 @@ export default function Interview() {
 
         setErrorMessage(message);
 
-        firstQuestionLoaded.current =
-          false;
-
+        firstQuestionLoaded.current = false;
       } finally {
         setLoading(false);
       }
     };
 
     loadFirstQuestion();
-
   }, [
     roleId,
     companyId,
@@ -443,6 +404,133 @@ export default function Interview() {
 
       return updated;
     });
+  };
+// Read the current interview question aloud
+  const readQuestion = () => {
+    const question = questions[currentIndex];
+    const text = question?.question_text || question?.question || "";
+
+    if (!text) {
+      alert("No question available to read.");
+      return;
+    }
+
+    if (!("speechSynthesis" in window)) {
+      alert("Text-to-speech is not supported by this browser.");
+      return;
+    }
+
+    window.speechSynthesis.cancel();
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = "en-IN";
+    utterance.rate = 0.9;
+
+    window.speechSynthesis.speak(utterance);
+  };
+
+  // Stop reading the question
+  const stopReading = () => {
+    window.speechSynthesis?.cancel();
+  };
+
+  // Start recording the candidate's answer
+  const startRecording = async () => {
+    try {
+      if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+        alert("Audio recording is not supported by this browser.");
+        return;
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: true,
+      });
+
+      streamRef.current = stream;
+      audioChunksRef.current = [];
+
+      const recorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = recorder;
+
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      recorder.onstop = () => {
+        const blob = new Blob(audioChunksRef.current, {
+          type: recorder.mimeType || "audio/webm",
+        });
+
+        setAudioBlob(blob);
+
+        streamRef.current?.getTracks().forEach((track) => track.stop());
+        streamRef.current = null;
+
+        setIsRecording(false);
+      };
+
+      recorder.onerror = () => {
+        alert("An error occurred while recording audio.");
+        setIsRecording(false);
+      };
+
+      recorder.start();
+      setIsRecording(true);
+      setAudioBlob(null);
+    } catch (error) {
+      console.error("Recording error:", error);
+      alert("Could not access the microphone. Please allow microphone access.");
+    }
+  };
+
+  // Stop recording the answer
+  const stopRecording = () => {
+    if (mediaRecorderRef.current?.state === "recording") {
+      mediaRecorderRef.current.stop();
+    }
+  };
+
+  // Convert recorded speech into text using Whisper
+  const handleTranscribe = async () => {
+    if (!audioBlob) {
+      alert("Please record your answer first.");
+      return;
+    }
+
+    try {
+      setIsTranscribing(true);
+
+      const transcript = await transcribeAudio(audioBlob);
+
+      if (!transcript.trim()) {
+        alert("No speech was detected. Please record your answer again.");
+        return;
+      }
+
+      setAnswers((prev) => {
+        const updated = {
+          ...prev,
+          [currentIndex]: transcript,
+        };
+
+        sessionStorage.setItem(
+          "current_interview_answers",
+          JSON.stringify(updated)
+        );
+
+        return updated;
+      });
+
+      setAudioBlob(null);
+      alert("Your answer has been transcribed successfully.");
+    } catch (error) {
+      console.error("Transcription error:", error);
+      alert(error.message || "Failed to transcribe your answer.");
+    } finally {
+      setIsTranscribing(false);
+    }
   };
 
   // =====================================================
@@ -474,10 +562,9 @@ export default function Interview() {
       "========== CURRENT QUESTION =========="
     );
 
-    console.dir(
-      currentQuestion,
-      { depth: null }
-    );
+    console.dir(currentQuestion, {
+      depth: null,
+    });
 
     console.log(
       "CURRENT QUESTION ID:",
@@ -487,6 +574,12 @@ export default function Interview() {
     if (!currentQuestionId) {
       throw new Error(
         "Question ID is missing."
+      );
+    }
+
+    if (!sessionId) {
+      throw new Error(
+        "Interview session is missing."
       );
     }
 
@@ -535,33 +628,32 @@ export default function Interview() {
     }
 
     return {
-  questionId: currentQuestionId,
+      questionId: currentQuestionId,
 
-  question:
-    currentQuestion.question_text ||
-    currentQuestion.question ||
-    "",
+      question:
+        currentQuestion.question_text ||
+        currentQuestion.question ||
+        "",
 
-  student_answer:
-    currentAnswer.trim(),
+      student_answer:
+        currentAnswer.trim(),
 
-  topic:
-    currentQuestion.topic ||
-    topic ||
-    "General",
+      topic:
+        currentQuestion.topic ||
+        topic ||
+        "General",
 
-  // Store only the final score for display
-  final_score: Number(
-    evaluationResult?.evaluation?.final_score ??
-    evaluationResult?.evaluation?.score ??
-    0
-  ) || 0,
+      final_score: Number(
+        evaluationResult?.evaluation?.final_score ??
+        evaluationResult?.evaluation?.score ??
+        0
+      ) || 0,
 
-  feedback:
-    evaluationResult?.evaluation?.feedback ||
-    evaluationResult?.evaluation?.result ||
-    "",
-};
+      feedback:
+        evaluationResult?.evaluation?.feedback ||
+        evaluationResult?.evaluation?.result ||
+        "",
+    };
   };
 
   // =====================================================
@@ -600,14 +692,8 @@ export default function Interview() {
         );
       }
 
-      // =================================================
-      // USER
-      // =================================================
-
       const user = getCurrentUser();
-
-      const candidateId =
-        user?.id || null;
+      const candidateId = user?.id || null;
 
       if (!candidateId) {
         throw new Error(
@@ -616,8 +702,7 @@ export default function Interview() {
       }
 
       // =================================================
-      // STEP 1
-      // EVALUATE + SAVE CURRENT ANSWER
+      // EVALUATE CURRENT ANSWER
       // =================================================
 
       const evaluation =
@@ -648,34 +733,41 @@ export default function Interview() {
       );
 
       // =================================================
-      // STEP 2
       // UPDATE HISTORY
       // =================================================
 
       const currentHistoryItem = {
-        questionId: evaluation.questionId,
+        questionId:
+          evaluation.questionId,
 
-        question: evaluation.question,
+        question:
+          evaluation.question,
 
-        answer: evaluation.student_answer,
+        answer:
+          evaluation.student_answer,
 
-        topic: evaluation.topic,
+        topic:
+          evaluation.topic,
 
-        score: evaluation.final_score,
+        score:
+          evaluation.final_score,
 
         difficulty:
-          currentQuestion.difficulty || "Medium",
+          currentQuestion.difficulty ||
+          "Medium",
 
-        feedback: evaluation.feedback,
+        feedback:
+          evaluation.feedback,
       };
 
       const updatedHistory = [
-      ...history.filter(
-        (item) =>
-          item.questionId !== evaluation.questionId
-      ),
-      currentHistoryItem,
-    ];
+        ...history.filter(
+          (item) =>
+            item.questionId !==
+            evaluation.questionId
+        ),
+        currentHistoryItem,
+      ];
 
       setHistory(updatedHistory);
 
@@ -687,8 +779,7 @@ export default function Interview() {
       );
 
       // =================================================
-      // STEP 3
-      // GENERATE NEXT QUESTION
+      // GET NEXT QUESTION
       // =================================================
 
       console.log(
@@ -758,18 +849,8 @@ export default function Interview() {
         );
       }
 
-      // =================================================
-      // IMPORTANT
-      // PRESERVE DATABASE ID
-      // =================================================
-
       const nextQuestion =
         nextResult.nextQuestion;
-
-      console.log(
-        "NEXT QUESTION OBJECT:",
-        nextQuestion
-      );
 
       const nextQuestionId =
         getQuestionId(nextQuestion);
@@ -785,18 +866,12 @@ export default function Interview() {
         );
       }
 
-      // =================================================
-      // ADD NEXT QUESTION
-      // =================================================
-
       const updatedQuestions = [
         ...questions,
         nextQuestion,
       ];
 
-      setQuestions(
-        updatedQuestions
-      );
+      setQuestions(updatedQuestions);
 
       sessionStorage.setItem(
         "current_interview_questions",
@@ -804,10 +879,6 @@ export default function Interview() {
           updatedQuestions
         )
       );
-
-      // =================================================
-      // MOVE FORWARD
-      // =================================================
 
       setCurrentIndex(
         currentIndex + 1
@@ -833,23 +904,42 @@ export default function Interview() {
   };
 
   // =====================================================
-  // SUBMIT FINAL QUESTION
+  // FINAL SUBMIT
   // =====================================================
 
   const handleSubmit = async () => {
+    if (isSubmitting) {
+      console.log(
+        "Submit already in progress. Ignoring duplicate click."
+      );
+      return;
+    }
+
     try {
       setIsSubmitting(true);
       setErrorMessage("");
+
+      console.log(
+        "\n========================================"
+      );
+
+      console.log(
+        "🔥 FINAL INTERVIEW SUBMISSION STARTED"
+      );
+
+      console.log(
+        "========================================"
+      );
+
+      // =================================================
+      // CURRENT QUESTION
+      // =================================================
 
       const currentQuestion =
         questions[currentIndex];
 
       const currentAnswer =
         answers[currentIndex];
-
-      // =================================================
-      // VALIDATE
-      // =================================================
 
       if (!currentQuestion) {
         throw new Error(
@@ -863,12 +953,6 @@ export default function Interview() {
       ) {
         throw new Error(
           "Please answer the question before submitting."
-        );
-      }
-
-      if (!sessionId) {
-        throw new Error(
-          "Interview session not found."
         );
       }
 
@@ -888,37 +972,30 @@ export default function Interview() {
       }
 
       // =================================================
+      // SESSION
+      // =================================================
+
+      // Use sessionStorage as a backup to React state
+      const storedSessionId =
+        sessionStorage.getItem(
+          "current_interview_session_id"
+        );
+
+      const finalSessionId =
+        sessionId || storedSessionId;
+
+      if (!finalSessionId) {
+        throw new Error(
+          "Interview session not found."
+        );
+      }
+
+      // =================================================
       // QUESTION ID
       // =================================================
 
-      console.log(
-        "========== FINAL QUESTION DEBUG =========="
-      );
-
-      console.log(
-        "currentIndex:",
-        currentIndex
-      );
-
-      console.dir(
-        currentQuestion,
-        { depth: null }
-      );
-
-      console.log(
-        "all questions:",
-        questions
-      );
-
       const currentQuestionId =
-        getQuestionId(
-          currentQuestion
-        );
-
-      console.log(
-        "FINAL QUESTION ID:",
-        currentQuestionId
-      );
+        getQuestionId(currentQuestion);
 
       if (!currentQuestionId) {
         throw new Error(
@@ -927,9 +1004,12 @@ export default function Interview() {
       }
 
       // =================================================
-      // STEP 1
-      // EVALUATE + SAVE Q5
+      // FINAL QUESTION EVALUATION
       // =================================================
+
+      console.log(
+        "🔥 STEP 1: Evaluating final question"
+      );
 
       const evaluation =
         await evaluateCurrentAnswer({
@@ -939,17 +1019,21 @@ export default function Interview() {
         });
 
       console.log(
-        "========== Q5 EVALUATION =========="
+        "🔥 STEP 1 COMPLETE:",
+        evaluation
       );
 
-      console.dir(
-        evaluation,
-        { depth: null }
-      );
+      if (
+        !evaluation ||
+        evaluation.final_score === undefined
+      ) {
+        throw new Error(
+          "Final question evaluation failed."
+        );
+      }
 
       // =================================================
-      // STEP 2
-      // SAVE Q5 EVALUATION TO FRONTEND STATE
+      // SAVE FINAL EVALUATION
       // =================================================
 
       const updatedEvaluations = [
@@ -969,37 +1053,43 @@ export default function Interview() {
       );
 
       // =================================================
-      // STEP 3
-      // SAVE Q5 HISTORY
+      // SAVE FINAL HISTORY
       // =================================================
 
+      const finalHistoryItem = {
+        questionId:
+          evaluation.questionId,
+
+        question:
+          evaluation.question,
+
+        answer:
+          evaluation.student_answer,
+
+        topic:
+          evaluation.topic,
+
+        score:
+          evaluation.final_score,
+
+        difficulty:
+          currentQuestion.difficulty ||
+          "Medium",
+
+        feedback:
+          evaluation.feedback,
+      };
+
       const updatedHistory = [
-        ...history,
-        {
-          question:
-            evaluation.question,
-
-          answer:
-            evaluation.student_answer,
-
-          topic:
-            evaluation.topic,
-
-          score:
-            evaluation.final_score,
-
-          difficulty:
-            currentQuestion.difficulty ||
-            "Medium",
-
-          feedback:
-            evaluation.feedback,
-        },
+        ...history.filter(
+          (item) =>
+            item.questionId !==
+            evaluation.questionId
+        ),
+        finalHistoryItem,
       ];
 
-      setHistory(
-        updatedHistory
-      );
+      setHistory(updatedHistory);
 
       sessionStorage.setItem(
         "current_interview_history",
@@ -1009,8 +1099,7 @@ export default function Interview() {
       );
 
       // =================================================
-      // STEP 4
-      // GET START TIME
+      // START TIME
       // =================================================
 
       const startedAt =
@@ -1018,37 +1107,72 @@ export default function Interview() {
           "current_interview_started_at"
         );
 
+      console.log(
+        "🔥 START TIME:",
+        startedAt
+      );
+
       // =================================================
-      // STEP 5
-      // GENERATE FINAL REPORT
+      // FINALIZE INTERVIEW
       // =================================================
 
       console.log(
-        "========== GENERATING FINAL INTERVIEW REPORT =========="
+        "\n🔥 STEP 2: CALLING EXPRESS evaluateInterview"
+      );
+
+      console.log({
+        candidateId,
+        sessionId: finalSessionId,
+        roleId:
+          roleId !== null &&
+          roleId !== undefined &&
+          roleId !== ""
+            ? Number(roleId)
+            : null,
+        companyId:
+          companyId !== null &&
+          companyId !== undefined &&
+          companyId !== ""
+            ? Number(companyId)
+            : null,
+        testType: "interview",
+        startedAt,
+      });
+
+      console.log(
+        "🔥 STEP 2: evaluateInterview() FUNCTION ABOUT TO RUN"
       );
 
       const finalResult =
         await evaluateInterview({
           candidateId,
 
-          sessionId,
+          sessionId:
+            finalSessionId,
 
           roleId:
-            Number(roleId),
+            roleId !== null &&
+            roleId !== undefined &&
+            roleId !== ""
+              ? Number(roleId)
+              : null,
 
           companyId:
-            companyId
+            companyId !== null &&
+            companyId !== undefined &&
+            companyId !== ""
               ? Number(companyId)
               : null,
 
           testType:
             "interview",
 
-          startedAt,
+          startedAt:
+            startedAt || null,
         });
 
       console.log(
-        "========== FINAL INTERVIEW RESULT =========="
+        "🔥 STEP 2 COMPLETE: evaluateInterview() RETURNED"
       );
 
       console.dir(
@@ -1056,51 +1180,101 @@ export default function Interview() {
         { depth: null }
       );
 
+      // =================================================
+      // VALIDATE RESPONSE
+      // =================================================
+
       if (
         !finalResult ||
-        finalResult.success === false
+        finalResult.success !== true
       ) {
         throw new Error(
           finalResult?.error ||
           finalResult?.details ||
-          "Failed to generate final interview report."
+          "Failed to complete interview."
         );
       }
 
       // =================================================
-      // STEP 6
+      // VERIFY TEST ATTEMPT
+      // =================================================
+
+      if (
+        !finalResult.attempt ||
+        !finalResult.attempt.attempt_id
+      ) {
+        throw new Error(
+          "Interview completed, but test attempt was not saved."
+        );
+      }
+
+      console.log(
+        "\n========================================"
+      );
+
+      console.log(
+        "✅ TEST ATTEMPT CONFIRMED"
+      );
+
+      console.log(
+        "Attempt ID:",
+        finalResult.attempt.attempt_id
+      );
+
+      console.log(
+        "Score:",
+        finalResult.attempt.score
+      );
+
+      console.log(
+        "========================================"
+      );
+
+      // =================================================
       // NAVIGATE TO FEEDBACK
       // =================================================
 
-      navigate(
-        "/feedback",
-        {
-          state: {
-            report:
-              finalResult.report,
+      navigate("/feedback", {
+        state: {
+          report:
+            finalResult.report || null,
 
-            overallScore:
-              finalResult.overallScore,
+          overallScore:
+            finalResult.overallScore ??
+            finalResult.score ??
+            0,
 
-            totalQuestions:
-              finalResult.totalQuestions,
+          totalQuestions:
+            finalResult.totalQuestions,
 
-            correctAnswers:
-              finalResult.correctAnswers,
+          correctAnswers:
+            finalResult.correctAnswers,
 
-            durationMinutes:
-              finalResult.durationMinutes,
+          durationMinutes:
+            finalResult.durationMinutes,
 
-            candidateId,
+          candidateId,
 
-            sessionId,
-          },
-        }
-      );
+          sessionId:
+            finalSessionId,
+
+          attempt:
+            finalResult.attempt,
+        },
+      });
 
     } catch (error) {
       console.error(
-        "Final interview submission failed:",
+        "\n========== FINAL INTERVIEW SUBMISSION FAILED =========="
+      );
+
+      console.error(
+        "Message:",
+        error?.message
+      );
+
+      console.error(
+        "Error:",
         error
       );
 
@@ -1198,9 +1372,7 @@ export default function Interview() {
   // NO QUESTIONS
   // =====================================================
 
-  if (
-    questions.length === 0
-  ) {
+  if (questions.length === 0) {
     return (
       <div className="p-10 text-center">
         No questions found.
@@ -1241,8 +1413,6 @@ export default function Interview() {
   return (
     <div className="p-10 max-w-2xl mx-auto shadow-xl rounded-2xl bg-white border mt-10">
 
-      {/* Progress */}
-
       <div className="w-full bg-gray-200 h-2 rounded-full mb-6">
 
         <div
@@ -1256,8 +1426,6 @@ export default function Interview() {
         />
 
       </div>
-
-      {/* Header */}
 
       <div className="flex justify-between items-center mb-6">
 
@@ -1274,13 +1442,30 @@ export default function Interview() {
 
       </div>
 
-      {/* Question */}
-
       <div className="mb-8">
 
         <p className="text-2xl font-semibold text-gray-800 mb-4">
           {questionText}
         </p>
+        
+        <div className="flex flex-wrap gap-3 mb-4">
+          <button
+            type="button"
+            onClick={readQuestion}
+            disabled={isRecording || isTranscribing}
+            className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+          >
+            🔊 Read Question
+          </button>
+
+          <button
+            type="button"
+            onClick={stopReading}
+            className="px-4 py-2 rounded-lg bg-gray-600 text-white hover:bg-gray-700"
+          >
+            ⏹ Stop Reading
+          </button>
+        </div>
 
         <textarea
           className="w-full p-4 border-2 rounded-xl focus:border-blue-500 outline-none transition-all resize-none"
@@ -1298,17 +1483,57 @@ export default function Interview() {
           }
         />
 
-      </div>
+        
+        <div className="flex flex-wrap gap-3 mt-4">
+          {!isRecording ? (
+            <button
+              type="button"
+              onClick={startRecording}
+              disabled={isTranscribing || isEvaluating || isSubmitting}
+              className="px-4 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+            >
+              🎙 Start Recording
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={stopRecording}
+              className="px-4 py-2 rounded-lg bg-gray-700 text-white hover:bg-gray-800"
+            >
+              ⏹ Stop Recording
+            </button>
+          )}
 
-      {/* Error */}
+          <button
+            type="button"
+            onClick={handleTranscribe}
+            disabled={!audioBlob || isTranscribing || isRecording}
+            className="px-4 py-2 rounded-lg bg-green-600 text-white hover:bg-green-700 disabled:opacity-50"
+          >
+            {isTranscribing ? "Transcribing..." : "📝 Transcribe Answer"}
+          </button>
+        </div>
+
+        {isRecording && (
+          <p className="mt-2 text-sm text-red-600">
+            Recording your answer... Click Stop Recording when finished.
+          </p>
+        )}
+
+        {audioBlob && !isRecording && (
+          <p className="mt-2 text-sm text-green-600">
+            Recording ready. Click Transcribe Answer to fill in your response.
+          </p>
+        )}
+
+
+      </div>
 
       {errorMessage && (
         <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-600">
           {errorMessage}
         </div>
       )}
-
-      {/* Navigation */}
 
       <div className="flex justify-end">
 
@@ -1321,6 +1546,8 @@ export default function Interview() {
                 currentIndex
               ]?.trim() ||
               isSubmitting ||
+              isRecording ||
+              isTranscribing ||
               isEvaluating
             }
             className="bg-green-600 text-white px-8 py-3 rounded-lg font-bold hover:bg-green-700 shadow-lg disabled:bg-gray-400 disabled:cursor-not-allowed"
@@ -1337,6 +1564,8 @@ export default function Interview() {
                 currentIndex
               ]?.trim() ||
               isEvaluating ||
+              isRecording ||
+              isTranscribing ||
               isSubmitting
             }
             className="bg-blue-600 text-white px-8 py-3 rounded-lg font-bold hover:bg-blue-700 shadow-lg disabled:bg-gray-400 disabled:cursor-not-allowed"

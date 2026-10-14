@@ -52,13 +52,18 @@ export const evaluateAnswers = async (req, res) => {
     const questionIds = answers.map((a) => a.questionId);
 
     const questionData = await client.query(
-      `SELECT id, expected_answer FROM questions WHERE id = ANY($1)`,
+      `SELECT id, question_text, expected_answer
+      FROM questions
+      WHERE id = ANY($1)`,
       [questionIds]
     );
 
     const questionMap = {};
     questionData.rows.forEach((q) => {
-      questionMap[q.id] = q.expected_answer;
+      questionMap[q.id] = {
+        questionText: q.question_text || "",
+        expectedAnswer: q.expected_answer || "",
+      };
     });
 
     const results = [];
@@ -70,14 +75,21 @@ export const evaluateAnswers = async (req, res) => {
     for (const ans of answers) {
       console.log("👉 Processing Question:", ans.questionId);
 
-      const expected = questionMap[ans.questionId] || "";
+      const question = questionMap[ans.questionId];
 
       const aiData = await evaluateAnswer(
         ans.answerText,
-        expected,
+        question?.questionText || "",
+        question?.expectedAnswer || "",
         selectedRoleName,
         selectedCompanyName
       );
+
+      console.log("VTU QUESTION:", question?.questionText);
+      console.log("STUDENT ANSWER:", ans.answerText);
+      console.log("EXPECTED ANSWER:", question?.expectedAnswer);
+      console.log("AI DATA:", aiData);
+
 
       // ✅ SAFE VALUES (NO NaN EVER)
       const finalScore = Number(aiData.final_score ?? aiData.score ?? 0) || 0;
@@ -87,10 +99,25 @@ export const evaluateAnswers = async (req, res) => {
       const smith = Number(aiData.smith_score) || 0;
 
       // ✅ INSERT ANSWER
+
       const inserted = await client.query(
-        `INSERT INTO answers 
-        (candidate_id, question_id, answer_text, ai_score, ai_feedback, session_id, semantic_score, smith_score, role_id, company_id) 
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+        `INSERT INTO answers
+        (
+          candidate_id,
+          question_id,
+          answer_text,
+          ai_score,
+          ai_feedback,
+          session_id,
+          semantic_score,
+          role_id,
+          company_id,
+          keyword_match_score,
+          llm_score,
+          smith_waterman_score,
+          final_score
+        )
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
         RETURNING *`,
         [
           candidateId,
@@ -100,11 +127,15 @@ export const evaluateAnswers = async (req, res) => {
           feedback,
           sessionId,
           semantic,
-          smith,
           roleId || null,
           companyId || null,
+          Number(aiData.keyword_match_score) || 0,
+          Number(aiData.llm_score) || 0,
+          Number(aiData.smith_waterman_score) || 0,
+          finalScore,
         ]
       );
+
 
       console.log("✅ INSERTED:", inserted.rows[0]);
 
@@ -133,8 +164,6 @@ export const evaluateAnswers = async (req, res) => {
        SET total_score = EXCLUDED.total_score`,
       [candidateId, sessionId, overallScore]
     );
-
-    await client.query("COMMIT");
 
     console.log("✅ REPORT SAVED");
 
