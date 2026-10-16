@@ -1,6 +1,8 @@
 import json
+import random
 import re
 import time
+from difflib import SequenceMatcher
 
 from llama.llama_client import ask_llama
 from rag.retrieve import retrieve_context
@@ -8,413 +10,585 @@ from interview.company_profiles import COMPANY_STYLE
 from interview.interview_engine import adjust_difficulty
 
 
-def generate_question(
-    role,
-    company,
-    topic,
-    history=None,
-    question_type="Technical",
-    category="Conceptual"
-):
-    """
-    Generate a single interview question and expected answer using:
-    - RAG knowledge base
-    - Company interview profile
-    - Llama 3.2:3b
-    - Adaptive difficulty
-    """
+STOPWORDS = {
+    "a", "an", "the", "is", "are", "of", "in", "on", "to", "for",
+    "and", "or", "what", "how", "why", "does", "do", "can", "you",
+    "explain", "between", "difference", "primary", "main", "goal",
+    "purpose", "with", "that", "this", "it", "its", "by", "as",
+    "be", "when", "which", "would", "could", "should", "your",
+    "their", "using", "use", "describe", "tell", "me", "about",
+}
 
-    # =====================================================
-    # START TOTAL TIMER
-    # =====================================================
+MAX_ATTEMPTS = 5
+NUM_PREDICT = 200  # 120 can truncate the JSON output
 
-    total_start = time.perf_counter()
 
-    # =====================================================
-    # SAFE DEFAULTS
-    # =====================================================
+# =========================================================
+# ROLE-SPECIFIC SKILL SIGNALS
+# =========================================================
 
-    history = history or []
+ROLE_SKILLS = {
+    "software developer": [
+        "programming", "algorithm", "data structure", "array",
+        "string", "linked list", "stack", "queue", "tree", "graph",
+        "hash table", "hashmap", "dictionary", "sorting", "searching",
+        "time complexity", "space complexity", "big o", "recursion",
+        "object oriented", "oop", "class", "object", "inheritance",
+        "polymorphism", "encapsulation", "abstraction", "debugging",
+        "function", "variable", "loop", "exception", "unit testing",
+        "software testing", "sql", "database", "api", "http",
+        "operating system", "memory", "concurrency", "git",
+        "version control", "compiler", "code",
+    ],
+    "python developer": [
+        "python", "list", "tuple", "dictionary", "set", "string",
+        "function", "class", "object", "inheritance", "decorator",
+        "generator", "iterator", "exception", "module", "package",
+        "list comprehension", "file handling", "lambda", "pip",
+        "virtual environment", "debugging", "algorithm", "data structure",
+        "api", "testing",
+    ],
+    "full stack developer": [
+        "html", "css", "javascript", "frontend", "backend", "react",
+        "angular", "vue", "node", "api", "rest", "http", "database",
+        "sql", "authentication", "authorization", "server", "client",
+        "web application", "responsive", "debugging", "testing",
+    ],
+    "backend developer": [
+        "api", "rest", "http", "database", "sql", "server",
+        "authentication", "authorization", "caching", "concurrency",
+        "data structure", "algorithm", "exception", "testing",
+        "networking", "performance",
+    ],
+    "frontend developer": [
+        "html", "css", "javascript", "typescript", "react", "angular",
+        "vue", "dom", "browser", "responsive", "accessibility",
+        "component", "state", "event", "api", "frontend", "web",
+    ],
+    "data scientist": [
+        "statistics", "probability", "python", "pandas", "numpy",
+        "data cleaning", "data analysis", "regression", "classification",
+        "machine learning", "model evaluation", "feature engineering",
+        "visualization", "overfitting", "underfitting",
+    ],
+    "machine learning engineer": [
+        "machine learning", "model", "training", "inference",
+        "feature engineering", "overfitting", "underfitting",
+        "classification", "regression", "evaluation", "python",
+        "neural network", "deployment", "data pipeline",
+    ],
+}
 
-    role = role or "General"
-    company = company or "General"
-    topic = topic or "General"
-    question_type = question_type or "Technical"
-    category = category or "Conceptual"
+# Not invalid topics, but they should not dominate a general
+# technical interview.
+LOW_PRIORITY_GENERAL_TOPICS = [
+    "waterfall model",
+    "incremental model",
+    "software development life cycle",
+    "software development lifecycle",
+    "project management methodology",
+    "agile methodology",
+    "scrum methodology",
+    "requirements engineer",
+    "requirements engineering",
+]
 
-    # =====================================================
-    # ADAPTIVE DIFFICULTY
-    # =====================================================
+DIFFICULTY_GUIDE = {
+    "Easy": (
+        "Ask for a simple definition or a basic example of the concept."
+    ),
+    "Medium": (
+        "Ask for a comparison, a use case, or how the concept works "
+        "in a small scenario."
+    ),
+    "Hard": (
+        "Ask about a trade-off, an edge case, or what goes wrong in a "
+        "short scenario. Still entry-level, no system design."
+    ),
+}
 
-    difficulty = adjust_difficulty(history)
 
-    performance = history[-3:] if history else []
+# =========================================================
+# FOCUS CONCEPTS (gives the model a concrete, rotating target)
+# =========================================================
 
-    # =====================================================
-    # RETRIEVE RELEVANT CONTEXT
-    # =====================================================
+OOP_FOCUS = [
+    "encapsulation with a simple class example",
+    "inheritance and method reuse",
+    "method overloading vs method overriding",
+    "abstract class vs interface",
+    "polymorphism with a practical example",
+    "constructors and object initialization",
+    "composition vs inheritance",
+    "access modifiers (public, private, protected)",
+    "static vs instance members",
+    "the this / self reference",
+    "class vs object",
+    "abstraction and hiding implementation details",
+]
 
-    rag_start = time.perf_counter()
+TOPIC_SUBTOPICS = {
+    "object oriented programming": OOP_FOCUS,
+    "oops": OOP_FOCUS,
+    "oop": OOP_FOCUS,
+    "dsa": [
+        "array vs linked list",
+        "stack use cases",
+        "queue vs stack",
+        "hash map collisions",
+        "binary search time complexity",
+        "reversing a string",
+        "detecting duplicates in an array",
+        "BFS vs DFS",
+        "bubble sort vs merge sort",
+        "Big O of nested loops",
+    ],
+    "sql": [
+        "INNER JOIN vs LEFT JOIN",
+        "primary key vs foreign key",
+        "GROUP BY with HAVING",
+        "WHERE vs HAVING",
+        "database indexes",
+        "normalization",
+        "DELETE vs TRUNCATE",
+        "finding duplicate rows",
+    ],
+}
 
-    context = retrieve_context(
-        role=role,
-        company=company,
-        topic=topic
-    )
 
-    rag_time = time.perf_counter() - rag_start
+# =========================================================
+# INPUT NORMALIZATION
+# =========================================================
 
-    # =====================================================
-    # HANDLE RAG CONTEXT
-    # =====================================================
+def clean_input(value, default="General"):
+    if value is None:
+        return default
 
-    if isinstance(context, dict):
+    value = " ".join(str(value).split())
+    return value or default
 
-        context = context.get(
-            "context",
-            ""
+
+def normalize_question(question):
+    if not question:
+        return ""
+
+    question = str(question).lower().strip()
+    question = re.sub(r"^\s*\d+[\.\)\-:]\s*", "", question)
+    question = re.sub(r"[^\w\s]", " ", question)
+    return " ".join(question.split())
+
+
+def content_words(normalized_text):
+    return {
+        word
+        for word in normalized_text.split()
+        if word not in STOPWORDS
+    }
+
+
+def contains_any(text, terms):
+    return any(term in text for term in terms)
+
+
+def is_general_topic(topic):
+    return normalize_question(topic) in {
+        "general",
+        "any",
+        "all",
+        "mixed",
+        "general technical",
+    }
+
+
+# =========================================================
+# HISTORY HELPERS (adaptive behaviour)
+# =========================================================
+
+def get_previous_questions(history):
+    questions = []
+    question_keys = [
+        "question",
+        "interviewer_question",
+        "generated_question",
+    ]
+
+    for item in history or []:
+        if not isinstance(item, dict):
+            continue
+
+        for key in question_keys:
+            question = item.get(key)
+
+            if isinstance(question, str) and question.strip():
+                questions.append(question.strip())
+                break
+
+    unique_questions = []
+    seen = set()
+
+    for question in questions:
+        normalized = normalize_question(question)
+
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            unique_questions.append(question)
+
+    return unique_questions
+
+
+def summarize_performance(history):
+    """Compact, prompt-friendly summary of the last 3 answers."""
+    lines = []
+
+    for item in (history or [])[-3:]:
+        if not isinstance(item, dict):
+            continue
+
+        name = item.get("subtopic") or item.get("topic") or "?"
+        lines.append(
+            f"- {name}: score {item.get('score', '?')} "
+            f"({item.get('difficulty') or item.get('level') or '?'})"
         )
 
-    elif isinstance(context, list):
+    return "\n".join(lines) or "No previous performance."
 
-        context = "\n".join(
-            str(item)
-            for item in context
-        )
 
-    elif context is None:
+def get_weak_subtopics(history, threshold=65, max_repeats=3):
+    """
+    Subtopics where the candidate averages below the threshold,
+    excluding ones already asked so often they would feel repetitive.
+    """
+    scores = {}
 
-        context = ""
+    for item in history or []:
+        if not isinstance(item, dict):
+            continue
+
+        subtopic = item.get("subtopic")
+        score = item.get("score")
+
+        if subtopic and isinstance(score, (int, float)):
+            scores.setdefault(subtopic, []).append(score)
+
+    return [
+        subtopic
+        for subtopic, values in scores.items()
+        if sum(values) / len(values) < threshold
+        and len(values) < max_repeats
+    ]
+
+
+# =========================================================
+# FOCUS PICKER
+# =========================================================
+
+def pick_focus(role, topic, previous_questions, rejected_questions,
+               tried_focuses, weak_subtopics=None):
+    """
+    Choose a concrete concept for this attempt so the model has a
+    specific target instead of copying whatever the RAG context says.
+    Biased toward subtopics the candidate is weak in.
+    """
+    topic_text = normalize_question(topic)
+    role_text = normalize_question(role)
+
+    if is_general_topic(topic):
+        pool = []
+
+        for role_name in sorted(ROLE_SKILLS, key=len, reverse=True):
+            if role_name in role_text:
+                pool = ROLE_SKILLS[role_name]
+                break
+
+        pool = pool or ROLE_SKILLS["software developer"]
 
     else:
+        pool = TOPIC_SUBTOPICS.get(topic_text) or [topic]
 
-        context = str(context)
+    used_text = " ".join(
+        normalize_question(q)
+        for q in previous_questions + rejected_questions
+    )
 
-    context = context.strip()
+    candidates = [s for s in pool if s not in tried_focuses]
 
-    if not context:
-
-        context = (
-            "No reference material available. "
-            "Use general interview knowledge."
+    # Prefer concepts whose keywords have not appeared in earlier questions.
+    unused = [
+        s for s in candidates
+        if not any(
+            word in used_text
+            for word in content_words(normalize_question(s))
         )
+    ]
 
-    # Limit context to avoid unnecessarily large prompts
-    if len(context) > 1000:
+    # Revisit weak areas on the first attempts (about 60% of the time).
+    weak = [
+        s for s in (weak_subtopics or [])
+        if s in pool and s not in tried_focuses
+    ]
 
-        context = context[:1000]
+    if weak and random.random() < 0.6:
+        choice = random.choice(weak)
+    else:
+        choice = random.choice(unused or candidates or pool)
 
-    print(
-        f"RAG retrieval time: {rag_time:.2f} seconds"
-    )
+    tried_focuses.add(choice)
+    return choice
 
-    print(
-        f"RAG context characters: {len(context)}"
-    )
 
-    # =====================================================
-    # COMPANY PROFILE
-    # =====================================================
+# =========================================================
+# DUPLICATE DETECTION
+# =========================================================
 
-    profile = COMPANY_STYLE.get(
-        company.lower() if company else "",
-        {}
-    )
+def is_duplicate_question(
+    new_question,
+    previous_questions,
+    threshold=0.82,
+    jaccard_threshold=0.75,
+):
+    normalized_new = normalize_question(new_question)
 
-    interview_style = ", ".join(
-        profile.get("interview_style", [])
-    )
+    if not normalized_new:
+        return True
 
-    focus = ", ".join(
-        profile.get("focus", [])
-    )
+    new_words = content_words(normalized_new)
 
-    preferred_topics = ", ".join(
-        profile.get("preferred_topics", [])
-    )
+    for previous in previous_questions:
+        normalized_previous = normalize_question(previous)
 
-    coding_level = profile.get(
-        "coding_level",
-        "Intermediate"
-    )
+        if not normalized_previous:
+            continue
 
-    behavioral = (
-        "Yes"
-        if profile.get("behavioral", False)
-        else "No"
-    )
+        if normalized_new == normalized_previous:
+            print("Exact duplicate matched:", previous)
+            return True
 
-    description = profile.get(
-        "description",
-        "General technical interview."
-    )
+        similarity = SequenceMatcher(
+            None,
+            normalized_new,
+            normalized_previous,
+        ).ratio()
 
-    # =====================================================
-    # PROMPT
-    # =====================================================
+        if similarity >= threshold:
+            print(
+                f"Similar question matched "
+                f"(similarity={similarity:.2f}):",
+                previous,
+            )
+            return True
 
-    prompt = f"""
-    You are an expert technical interviewer.
+        previous_words = content_words(normalized_previous)
+        union = new_words | previous_words
 
-    Generate exactly ONE interview question and ONE expected answer.
+        if union:
+            jaccard = len(new_words & previous_words) / len(union)
 
-    REFERENCE MATERIAL:
-    {context}
+            if jaccard >= jaccard_threshold:
+                print(
+                    f"Similar-content question matched "
+                    f"(jaccard={jaccard:.2f}):",
+                    previous,
+                )
+                return True
 
-    CANDIDATE INFORMATION:
-    Role: {role}
-    Company: {company}
-    Difficulty: {difficulty}
-    Topic: {topic}
-    Question Type: {question_type}
-    Category: {category}
+    return False
 
-    DIFFICULTY:
-    Easy: Basic definitions, fundamentals, simple examples.
-    Medium: Practical implementation, debugging, real-world usage.
-    Hard: Optimization, architecture decisions, advanced problem solving.
 
-    COMPANY PROFILE:
-    Description: {description}
-    Interview Style: {interview_style}
-    Main Focus: {focus}
-    Preferred Topics: {preferred_topics}
-    Coding Level: {coding_level}
-    Behavioral Round: {behavioral}
+# =========================================================
+# ROLE AND TOPIC RELEVANCE VALIDATION
+# =========================================================
 
-    PREVIOUS PERFORMANCE:
-    {performance}
+def is_relevant_question(
+    question,
+    role,
+    topic,
+    question_type="Technical",
+    category="Conceptual",
+    focus=None,
+):
+    text = normalize_question(question)
+    role_text = normalize_question(role)
+    topic_text = normalize_question(topic)
+    type_text = normalize_question(question_type)
 
-    IMPORTANT:
-    - Use previous questions only to avoid repetition and adjust difficulty.
-    - Do NOT repeat or rephrase a previous question.
-    - If a concept was already tested, choose a different concept, scenario, or aspect.
+    if not text:
+        return False
 
-    ROLE GUIDELINES:
-    Software Developer: DSA, OOP, System Design, Debugging.
-    Python Developer: Python internals, OOP, Libraries, APIs, Performance.
-    Full Stack Developer: Frontend, Backend, Database, APIs, Deployment.
-    AI/ML Intern: ML algorithms, Preprocessing, Model evaluation, Feature engineering.
-    Java Developer: Java, Spring Boot, JVM, Multithreading.
+    # Prevent machine-learning questions for unrelated roles.
+    ml_terms = [
+        "machine learning",
+        "deep learning",
+        "overfitting",
+        "underfitting",
+        "regularization",
+        "neural network",
+        "gradient descent",
+        "supervised learning",
+        "unsupervised learning",
+    ]
 
-    STRICT RULES:
-    - Generate exactly ONE question and ONE expected answer.
-    - Match the requested role, difficulty, topic, and category.
-    - Prefer reference material when relevant.
-    - Follow the company's interview style.
-    - Expected answer must be concise, technically correct, 20–35 words, maximum 2 sentences.
-    - Include only important concepts a strong candidate should mention.
-    - No code, markdown, bullets, explanations, multiple questions, or multiple answers.
-    - Do not add text outside JSON or use code fences.
-    - Return ONLY valid JSON with properly escaped quotation marks and no literal line breaks in string values.
+    ml_roles = [
+        "machine learning",
+        "deep learning",
+        "ai ml",
+        "artificial intelligence",
+        "data scientist",
+        "ml engineer",
+    ]
 
-    OUTPUT:
-    {{
-    "question": "Short interview question",
-    "expected_answer": "Short technically correct answer."
-    }}
-    """
+    is_ml_role = contains_any(role_text, ml_roles)
+    is_ml_topic = contains_any(topic_text, ml_roles)
 
-    # =====================================================
-    # CALL LLAMA
-    # =====================================================
+    if (
+        contains_any(text, ml_terms)
+        and not is_ml_role
+        and not is_ml_topic
+    ):
+        print("Rejected: machine-learning question for unrelated role.")
+        return False
 
-    llm_start = time.perf_counter()
-
-    try:
-
-        response = ask_llama(prompt, 120)
-
-    except Exception as error:
-
-        print(
-            "Llama question generation error:",
-            error
+    # Reject process / management theory for technical roles unless
+    # the user explicitly asked for it as the topic.
+    if (
+        contains_any(text, LOW_PRIORITY_GENERAL_TOPICS)
+        and not contains_any(
+            topic_text,
+            ["sdlc", "agile", "scrum", "software engineering",
+             "project management"],
         )
+    ):
+        print("Rejected: process/management question for technical role.")
+        return False
 
-        response = None
+    # General topic: require a role skill signal.
+    if is_general_topic(topic):
+        matched_role = None
 
-    llm_time = time.perf_counter() - llm_start
+        for role_name in sorted(ROLE_SKILLS, key=len, reverse=True):
+            if role_name in role_text:
+                matched_role = role_name
+                break
 
-    print(
-        f"Llama generation time: {llm_time:.2f} seconds"
-    )
+        if matched_role and not contains_any(text, ROLE_SKILLS[matched_role]):
+            print(
+                f"Rejected: question does not contain a clear "
+                f"'{matched_role}' skill signal."
+            )
+            return False
 
-    # =====================================================
-    # FALLBACK
-    # =====================================================
+    # Coding question type.
+    if "coding" in type_text or "programming" in type_text:
+        coding_signals = [
+            "write code",
+            "write a function",
+            "implement",
+            "program",
+            "code",
+            "algorithm",
+            "solve",
+            "return the",
+            "given an array",
+            "given a string",
+        ]
 
-    if not response:
+        if not contains_any(text, coding_signals):
+            print("Rejected: question does not match Coding question type.")
+            return False
 
-        total_time = time.perf_counter() - total_start
-
-        print("\n========== PERFORMANCE ==========")
-        print(
-            f"RAG time: {rag_time:.2f} seconds"
-        )
-        print(
-            f"LLM time: {llm_time:.2f} seconds"
-        )
-        print(
-            f"Total time: {total_time:.2f} seconds"
-        )
-        print("=================================\n")
-
-        return {
-            "question": (
-                f"Explain an important {topic} concept "
-                f"for a {role} interview."
-            ),
-            "expected_answer": (
-                f"A strong answer should clearly explain "
-                f"the important concepts related to {topic} "
-                f"and their practical usage."
-            ),
-            "difficulty": difficulty,
-            "topic": topic,
-            "company": company,
-            "role": role
+    # Specific topic: question must stay on topic.
+    if not is_general_topic(topic):
+        topic_aliases = {
+            "dsa": [
+                "data structure", "algorithm", "array", "string",
+                "linked list", "stack", "queue", "tree", "graph",
+                "sorting", "searching", "complexity", "hashmap",
+                "hash map", "binary search",
+            ],
+            "oops": [
+                "object oriented", "oop", "class", "object",
+                "inheritance", "polymorphism", "encapsulation",
+                "abstraction", "constructor", "overloading",
+                "overriding", "interface", "abstract",
+            ],
+            "object oriented programming": [
+                "object oriented", "oop", "class", "object",
+                "inheritance", "polymorphism", "encapsulation",
+                "abstraction", "constructor", "overloading",
+                "overriding", "interface", "abstract",
+            ],
+            "sql": [
+                "sql", "query", "join", "table", "database",
+                "primary key", "foreign key", "index", "group by",
+                "normalization",
+            ],
         }
 
-    # =====================================================
-    # PARSE LLM JSON
-    # =====================================================
+        terms = list(topic_aliases.get(topic_text, [topic_text]))
 
-    question = ""
-    expected_answer = ""
+        # Also accept the words of the chosen focus concept.
+        if focus:
+            terms.extend(content_words(normalize_question(focus)))
+
+        if not contains_any(text, terms):
+            print(
+                f"Rejected: question may not match requested topic "
+                f"'{topic}'."
+            )
+            return False
+
+    return True
+
+
+# =========================================================
+# PARSE LLAMA JSON
+# =========================================================
+
+def parse_question_response(response):
+    if not response:
+        raise ValueError("Empty LLM response")
+
+    response = response.strip()
+
+    response = re.sub(
+        r"^\s*```(?:json)?\s*",
+        "",
+        response,
+        flags=re.IGNORECASE,
+    )
+    response = re.sub(r"\s*```\s*$", "", response)
 
     try:
+        data = json.loads(response)
 
-        response = response.strip()
-
-        print(
-            "========== RAW LLAMA QUESTION RESPONSE =========="
-        )
-        print(response)
-        print(
-            "=================================================="
-        )
-
-        # -------------------------------------------------
-        # REMOVE MARKDOWN CODE FENCES
-        # -------------------------------------------------
-
-        response = re.sub(
-            r"^```json\s*",
-            "",
-            response,
-            flags=re.IGNORECASE
-        )
-
-        response = re.sub(
-            r"^```\s*",
-            "",
-            response
-        )
-
-        response = re.sub(
-            r"\s*```$",
-            "",
-            response
-        )
-
-        response = response.strip()
-
-        # -------------------------------------------------
-        # FIND JSON OBJECT
-        # -------------------------------------------------
-
+    except json.JSONDecodeError:
         start = response.find("{")
         end = response.rfind("}")
 
-        if start == -1 or end == -1 or end <= start:
-
+        if start == -1 or end <= start:
             raise ValueError(
-                "No valid JSON object found in LLM response"
+                f"No complete JSON object found. "
+                f"Raw response: {response[:500]}"
             )
 
-        json_text = response[
-            start:end + 1
-        ]
+        data = json.loads(response[start:end + 1])
 
-        # -------------------------------------------------
-        # PARSE JSON
-        # -------------------------------------------------
+    if not isinstance(data, dict):
+        raise ValueError("LLM response must be a JSON object")
 
-        data = json.loads(
-            json_text
-        )
+    question = str(data.get("question", "")).strip()
+    expected_answer = str(data.get("expected_answer", "")).strip()
 
-        if not isinstance(data, dict):
+    if not question:
+        raise ValueError("Generated question is empty")
 
-            raise ValueError(
-                "LLM response is not a JSON object"
-            )
+    if not expected_answer:
+        raise ValueError("Generated expected answer is empty")
 
-        question = str(
-            data.get(
-                "question",
-                ""
-            )
-        ).strip()
-
-        expected_answer = str(
-            data.get(
-                "expected_answer",
-                ""
-            )
-        ).strip()
-
-        # -------------------------------------------------
-        # VALIDATE QUESTION
-        # -------------------------------------------------
-
-        if not question:
-
-            raise ValueError(
-                "LLM returned an empty question"
-            )
-
-        # -------------------------------------------------
-        # VALIDATE EXPECTED ANSWER
-        # -------------------------------------------------
-
-        if not expected_answer:
-
-            raise ValueError(
-                "LLM returned an empty expected answer"
-            )
-
-    except Exception as error:
-
-        print(
-            "Question generation JSON parsing error:",
-            error
-        )
-
-        print(
-            "Raw LLM response:",
-            response
-        )
-
-        # -------------------------------------------------
-        # FALLBACK QUESTION
-        # -------------------------------------------------
-
-        question = (
-            f"Explain an important {topic} concept "
-            f"for a {role} interview."
-        )
-
-        expected_answer = (
-            f"A strong answer should clearly explain "
-            f"the important concepts related to {topic} "
-            f"and their practical usage."
-        )
-
-    # =====================================================
-    # CLEAN QUESTION
-    # =====================================================
+    question = re.sub(
+        r"^\s*\d+[\.\)\-:]\s*",
+        "",
+        question,
+    ).strip()
 
     prefixes = [
         "Here is your question:",
@@ -424,105 +598,420 @@ def generate_question(
     ]
 
     for prefix in prefixes:
+        if question.lower().startswith(prefix.lower()):
+            question = question[len(prefix):].strip()
 
-        if question.lower().startswith(
-            prefix.lower()
+    question = " ".join(question.split())
+    expected_answer = " ".join(expected_answer.split())
+
+    return question, expected_answer
+
+
+# =========================================================
+# LLM CALL
+# =========================================================
+
+def call_llm(prompt, temperature):
+    try:
+        return ask_llama(prompt, NUM_PREDICT, temperature=temperature)
+    except TypeError:
+        print("WARNING: ask_llama has no temperature parameter.")
+        return ask_llama(prompt, NUM_PREDICT)
+
+
+# =========================================================
+# PROMPT BUILDER
+# =========================================================
+
+def build_prompt(
+    role,
+    company,
+    topic,
+    difficulty,
+    question_type,
+    category,
+    context,
+    performance,
+    previous_questions_text,
+    rejected_questions,
+    profile_text,
+    focus,
+):
+    rejected_text = "\n".join(
+        f"- {question}" for question in rejected_questions
+    ) or "None"
+
+    difficulty_text = DIFFICULTY_GUIDE.get(
+        difficulty,
+        DIFFICULTY_GUIDE["Medium"],
+    )
+
+    return f"""
+You are an expert technical interviewer writing questions for entry-level candidates.
+
+Generate exactly ONE interview question and ONE expected answer.
+
+DETAILS:
+Role: "{role}"
+Company: "{company}"
+Topic: "{topic}"
+Question Type: "{question_type}"
+Category: "{category}"
+
+FOCUS CONCEPT (mandatory):
+The question MUST be directly about: {focus}
+Ignore any reference material that is unrelated to this concept.
+
+DIFFICULTY ({difficulty}):
+{difficulty_text}
+
+RULES:
+- Ask exactly ONE clear, entry-level question about the focus concept.
+- It must test a practical skill for the role "{role}".
+- It must differ from every question in the lists below.
+- Do not ask about requirements engineering, SDLC, or project management.
+
+REFERENCE MATERIAL (use only if relevant to the focus concept):
+{context}
+
+COMPANY STYLE:
+{profile_text}
+
+RECENT PERFORMANCE:
+{performance}
+
+ALREADY ASKED (do not repeat or paraphrase):
+{previous_questions_text}
+
+REJECTED (do not repeat or paraphrase):
+{rejected_text}
+
+EXPECTED ANSWER:
+- Technically accurate, simple professional language.
+- 20 to 35 words, at most two sentences, no code.
+
+OUTPUT RULES:
+- Return only valid JSON, no Markdown, no code fences, no commentary.
+- No literal line breaks inside JSON string values.
+
+OUTPUT FORMAT:
+{{
+    "question": "One interview question about the focus concept",
+    "expected_answer": "A concise, technically correct answer."
+}}
+"""
+
+
+# =========================================================
+# COMPANY PROFILE LOOKUP
+# =========================================================
+
+def get_company_profile(company):
+    company_key = normalize_question(company)
+
+    for key, profile in COMPANY_STYLE.items():
+        if normalize_question(key) == company_key:
+            return profile
+
+    for key, profile in COMPANY_STYLE.items():
+        normalized_key = normalize_question(key)
+
+        if (
+            normalized_key
+            and (
+                normalized_key in company_key
+                or company_key in normalized_key
+            )
         ):
+            return profile
 
-            question = question[
-                len(prefix):
-            ].strip()
+    return {}
 
-    # Remove accidental numbering
-    question = re.sub(
-        r"^\s*\d+[\.\)\-:]\s*",
-        "",
-        question
-    ).strip()
 
-    # Remove accidental newlines
-    question = " ".join(
-        question.split()
-    ).strip()
+# =========================================================
+# RAG HELPER
+# =========================================================
 
-    # =====================================================
+def get_context(role, company, topic, focus):
+    """Retrieve context for the focus; drop it only if harmful or off-role."""
+    try:
+        context = retrieve_context(
+            role=role,
+            company=company,
+            topic=focus if is_general_topic(topic) else f"{topic} {focus}",
+        )
+
+        if isinstance(context, dict):
+            context = context.get("context", "")
+        elif isinstance(context, list):
+            context = "\n".join(str(item) for item in context)
+
+        context = str(context or "").strip()
+
+    except Exception as error:
+        print("RAG retrieval error:", error)
+        return ""
+
+    if not context:
+        return ""
+
+    print("RAG preview:", context[:200].replace("\n", " "))
+
+    lowered = context.lower()
+
+    # Stems, so "authorization" also matches "authorize", "authorized".
+    focus_terms = {
+        word[:6]
+        for word in content_words(normalize_question(focus))
+        if len(word) > 3
+    }
+
+    if not is_general_topic(topic):
+        focus_terms |= {
+            word[:6]
+            for word in content_words(normalize_question(topic))
+            if len(word) > 3
+        }
+
+    on_focus = any(term in lowered for term in focus_terms)
+
+    role_terms = []
+
+    for role_name in sorted(ROLE_SKILLS, key=len, reverse=True):
+        if role_name in normalize_question(role):
+            role_terms = ROLE_SKILLS[role_name]
+            break
+
+    on_role = contains_any(lowered, role_terms) if role_terms else True
+    off_topic = contains_any(lowered, LOW_PRIORITY_GENERAL_TOPICS)
+
+    if off_topic and not on_focus:
+        print("RAG context dropped: process/management material.")
+        return ""
+
+    if not on_focus and not on_role:
+        print("RAG context dropped: unrelated to focus and role.")
+        return ""
+
+    return context[:1200]
+
+
+# =========================================================
+# GENERATE INTERVIEW QUESTION
+# =========================================================
+
+def generate_question(
+    role,
+    company,
+    topic,
+    history=None,
+    question_type="Technical",
+    category="Conceptual",
+):
+    total_start = time.perf_counter()
+
+    history = history or []
+
+    role = clean_input(role)
+    company = clean_input(company)
+    topic = clean_input(topic)
+    question_type = clean_input(question_type, "Technical")
+    category = clean_input(category, "Conceptual")
+
+    difficulty = adjust_difficulty(history)
+    performance = summarize_performance(history)
+    weak_subtopics = get_weak_subtopics(history)
+
+    previous_questions = get_previous_questions(history)
+
+    print(f"Previous questions available: {len(previous_questions)}")
+    print(f"Requested role: {role!r}")
+    print(f"Requested topic: {topic!r}")
+    print(f"Requested company: {company!r}")
+    print(f"Difficulty: {difficulty}")
+    print(f"Weak subtopics: {weak_subtopics}")
+
+    previous_questions_text = "\n".join(
+        f"- {question}"
+        for question in previous_questions[-30:]
+    ) or "No previous questions available."
+
+    # -----------------------------------------------------
+    # COMPANY PROFILE
+    # -----------------------------------------------------
+
+    profile = get_company_profile(company)
+
+    profile_text = (
+        f"Description: {profile.get('description', 'General technical interview.')}\n"
+        f"Interview Style: {', '.join(profile.get('interview_style', []))}\n"
+        f"Main Focus: {', '.join(profile.get('focus', []))}\n"
+        f"Preferred Topics: {', '.join(profile.get('preferred_topics', []))}\n"
+        f"Coding Level: {profile.get('coding_level', 'Intermediate')}\n"
+        f"Behavioral Round: {'Yes' if profile.get('behavioral', False) else 'No'}"
+    )
+
+    print("Company profile matched:", bool(profile))
+
+    # -----------------------------------------------------
+    # GENERATE AND VALIDATE
+    # -----------------------------------------------------
+
+    rejected_questions = []
+    tried_focuses = set()
+    question = ""
+    expected_answer = ""
+    focus = topic
+    llm_time = 0.0
+    rag_time = 0.0
+
+    for attempt in range(MAX_ATTEMPTS):
+        attempt_start = time.perf_counter()
+
+        try:
+            print(f"\nLLM generation attempt: {attempt + 1}")
+
+            focus = pick_focus(
+                role,
+                topic,
+                previous_questions,
+                rejected_questions,
+                tried_focuses,
+                weak_subtopics=weak_subtopics,
+            )
+            print("Focus concept:", focus)
+
+            rag_start = time.perf_counter()
+            context = get_context(role, company, topic, focus)
+            rag_time += time.perf_counter() - rag_start
+
+            context = context or (
+                "No reference material. Use your own technical knowledge."
+            )
+
+            print(f"RAG context characters: {len(context)}")
+
+            prompt = build_prompt(
+                role=role,
+                company=company,
+                topic=topic,
+                difficulty=difficulty,
+                question_type=question_type,
+                category=category,
+                context=context,
+                performance=performance,
+                previous_questions_text=previous_questions_text,
+                rejected_questions=rejected_questions,
+                profile_text=profile_text,
+                focus=focus,
+            )
+
+            # Raise temperature on each retry to break out of loops.
+            temperature = min(0.5 + 0.15 * attempt, 1.0)
+
+            response = call_llm(prompt, temperature=temperature)
+
+            if not response:
+                print("Empty LLM response")
+                continue
+
+            print("Raw response:", response)
+
+            candidate_question, candidate_answer = (
+                parse_question_response(response)
+            )
+
+            if not is_relevant_question(
+                candidate_question,
+                role,
+                topic,
+                question_type,
+                category,
+                focus=focus,
+            ):
+                print("Irrelevant question rejected:", candidate_question)
+                rejected_questions.append(candidate_question)
+                continue
+
+            if is_duplicate_question(
+                candidate_question,
+                previous_questions + rejected_questions,
+            ):
+                print("Duplicate question rejected:", candidate_question)
+                rejected_questions.append(candidate_question)
+                continue
+
+            question = candidate_question
+            expected_answer = candidate_answer
+            break
+
+        except Exception as error:
+            print(f"Generation attempt {attempt + 1} failed:", error)
+
+        finally:
+            llm_time += time.perf_counter() - attempt_start
+
+    # -----------------------------------------------------
+    # HANDLE FAILURE
+    # -----------------------------------------------------
+
+    if not question or not expected_answer:
+        total_time = time.perf_counter() - total_start
+
+        print("\n========== PERFORMANCE ==========")
+        print(f"RAG time: {rag_time:.2f} seconds")
+        print(f"Attempt time: {llm_time:.2f} seconds")
+        print(f"Total time: {total_time:.2f} seconds")
+        print(f"Rejected questions: {rejected_questions}")
+        print("=================================")
+
+        raise RuntimeError(
+            f"Unable to generate a valid, non-duplicate question "
+            f"for role '{role}' and topic '{topic}' "
+            f"after {MAX_ATTEMPTS} attempts. "
+            f"Rejected questions: {rejected_questions}"
+        )
+
+    # -----------------------------------------------------
     # CLEAN EXPECTED ANSWER
-    # =====================================================
+    # -----------------------------------------------------
 
-    expected_answer = " ".join(
-        expected_answer.split()
-    ).strip()
-
-    # Remove accidental markdown
     expected_answer = re.sub(
         r"```.*?```",
         "",
         expected_answer,
-        flags=re.DOTALL
+        flags=re.DOTALL,
     ).strip()
-
-    # =====================================================
-    # SAFETY LIMIT
-    # =====================================================
 
     words = expected_answer.split()
 
     if len(words) > 80:
+        expected_answer = " ".join(words[:80]).rstrip(".,;:") + "."
 
-        expected_answer = " ".join(
-            words[:80]
-        ).rstrip(".,;:") + "."
-
-        print(
-            "Expected answer exceeded 80 words. "
-            "Trimmed automatically."
-        )
-
-    # =====================================================
-    # FINAL RESPONSE
-    # =====================================================
+    # -----------------------------------------------------
+    # FINAL RESULT
+    # -----------------------------------------------------
 
     result = {
         "question": question,
         "expected_answer": expected_answer,
         "difficulty": difficulty,
         "topic": topic,
+        "subtopic": focus,
         "company": company,
-        "role": role
+        "role": role,
     }
 
-    print(
-        "========== FINAL GENERATED QUESTION =========="
-    )
-
-    print(
-        json.dumps(
-            result,
-            indent=2,
-            ensure_ascii=False
-        )
-    )
-
-    print(
-        "==============================================="
-    )
-
-    # =====================================================
-    # PERFORMANCE
-    # =====================================================
+    print("\n========== FINAL GENERATED QUESTION ==========")
+    print(json.dumps(result, indent=2, ensure_ascii=False))
+    print("===============================================")
 
     total_time = time.perf_counter() - total_start
 
     print("\n========== PERFORMANCE ==========")
-    print(
-        f"RAG time: {rag_time:.2f} seconds"
-    )
-    print(
-        f"LLM time: {llm_time:.2f} seconds"
-    )
-    print(
-        f"Total time: {total_time:.2f} seconds"
-    )
-    print("=================================\n")
+    print(f"RAG time: {rag_time:.2f} seconds")
+    print(f"Attempt time: {llm_time:.2f} seconds")
+    print(f"Total time: {total_time:.2f} seconds")
+    print("=================================")
 
     return result
