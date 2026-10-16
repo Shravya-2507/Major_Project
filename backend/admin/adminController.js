@@ -42,6 +42,24 @@ export const getDashboardStats = async (req, res) => {
   }
 };
 
+export const getCandidates = async (req, res) => {
+  try {
+    const data = await adminQueries.getCandidates();
+
+    return res.json({
+      success: true,
+      data,
+    });
+  } catch (err) {
+    console.error("Unable to fetch candidates:", err);
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to fetch candidates",
+    });
+  }
+};
+
 /**
  * Overall Leaderboard
  */

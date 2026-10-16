@@ -4,6 +4,54 @@ import pdfParse from "pdf-parse/lib/pdf-parse.js";
 const PYTHON_BACKEND_URL = process.env.PYTHON_BACKEND_URL || "http://localhost:8000";
 
 // =====================
+// Generate Job Description
+// =====================
+export const generateJobDescription = async (req, res) => {
+  const role = String(req.body?.role || "").trim();
+
+  if (!role) {
+    return res.status(400).json({
+      error: "Please select a target role",
+    });
+  }
+
+  try {
+    const response = await axios.post(
+      `${PYTHON_BACKEND_URL}/generate-job-description`,
+      { role },
+      { timeout: 60000 }
+    );
+
+    const jobDescription = response.data?.job_description;
+
+    if (typeof jobDescription !== "string" || !jobDescription.trim()) {
+      return res.status(502).json({
+        error: "The AI service returned an invalid job description",
+      });
+    }
+
+    return res.json({
+      success: true,
+      role,
+      jobDescription: jobDescription.trim(),
+    });
+  } catch (error) {
+    console.error(
+      "Job description generation error:",
+      error.response?.data || error.message
+    );
+
+    const isTimeout = error.code === "ECONNABORTED" || error.code === "ETIMEDOUT";
+
+    return res.status(502).json({
+      error: isTimeout
+        ? "Job description generation timed out. Please try again."
+        : "Unable to generate a job description right now.",
+    });
+  }
+};
+
+// =====================
 // Extract Resume Text
 // =====================
 export const extractResumeText = async (req, res) => {

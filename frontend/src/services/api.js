@@ -519,6 +519,11 @@ export const fetchVtuQuestions = async () => {
 // RESUME ANALYSIS
 // =========================================
 
+export const generateJobDescription = async (role) => {
+  const response = await api.post("/resume/generate-jd", { role });
+  return response.data;
+};
+
 export const analyzeResume = async (
   file,
   role = ""
@@ -661,6 +666,26 @@ export const fetchWeakestSubject =
 // =========================================
 
 export const codingAPI = {
+  get: async (path) => {
+    const response = await api.get(path);
+    return response.data;
+  },
+
+  getLanguages: async () => {
+    const response = await api.get("/code/languages");
+    return response.data;
+  },
+
+  startTest: async (payload) => {
+    const response = await api.post("/code/start", payload);
+    return response.data;
+  },
+
+  endTest: async (payload) => {
+    const response = await api.post("/code/end", payload);
+    return response.data;
+  },
+
   getQuestions: async (
     candidateId = 1
   ) => {
@@ -763,46 +788,22 @@ export const codingAPI = {
     language,
     input = ""
   ) => {
-    const res =
-      await fetch(
-        `${BASE_URL}/code/run`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type":
-              "application/json",
-          },
-          body: JSON.stringify({
-            code,
-            language,
-            language_id: language,
-            input,
-          }),
-        }
-      );
+    const response = await api.post("/code/run", {
+      code,
+      language,
+      language_id: language,
+      input,
+    });
 
-    return await handleResponse(res);
+    return response.data;
   },
 
   submitCode: async (
     payload
   ) => {
-    const response =
-      await fetch(
-        `${BASE_URL}/code/submit`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type":
-              "application/json",
-          },
-          body: JSON.stringify(payload),
-        }
-      );
+    const response = await api.post("/code/submit", payload);
 
-    return await handleResponse(
-      response
-    );
+    return response.data;
   },
 };
 
@@ -812,14 +813,15 @@ export const codingAPI = {
 // =========================================
 
 export const submitAnswers = async (data = {}) => {
-  return evaluateInterview({
-    candidateId: data.candidateId,
-    sessionId: data.sessionId,
-    roleId: data.roleId,
-    companyId: data.companyId,
-    testType: data.testType || "interview",
-    startedAt: data.startedAt || null,
+  const res = await fetch(`${BASE_URL}/vtu-answers`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(data),
   });
+
+  return await handleResponse(res);
 };
 
 // =========================================
@@ -910,5 +912,33 @@ export const getReport = async (
     );
 
     throw err;
+  }
+};
+
+// =========================================
+// AUDIO TRANSCRIPTION (WHISPER)
+// Used by VTU Modules and Interview only
+// =========================================
+
+export const transcribeAudio = async (audioBlob) => {
+  try {
+    const formData = new FormData();
+
+    formData.append("audio", audioBlob, "recording.webm");
+
+    const response = await fetch(
+      `${BASE_URL}/transcribe-audio`,
+      {
+        method: "POST",
+        body: formData,
+      }
+    );
+
+    const result = await handleResponse(response);
+
+    return result.transcript || "";
+  } catch (error) {
+    console.error("Audio Transcription Error:", error.message);
+    throw error;
   }
 };

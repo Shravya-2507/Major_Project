@@ -1,6 +1,10 @@
 import express from "express";
 import multer from "multer";
-import { analyzeResume, extractResumeText } from "../controllers/resumeController.js";
+import {
+	analyzeResume,
+	extractResumeText,
+	generateJobDescription,
+} from "../controllers/resumeController.js";
 
 const router = express.Router();
 
@@ -9,6 +13,8 @@ const upload = multer({ storage: multer.memoryStorage() });
 
 // Route for standalone text extraction
 router.post("/extract-text", upload.single("file"), extractResumeText);
+
+router.post("/generate-jd", generateJobDescription);
 
 // Route for full RAG analysis pipeline
 router.post("/analyze-resume", upload.single("file"), analyzeResume);

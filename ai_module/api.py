@@ -1,10 +1,10 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException ,UploadFile,File
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any, Optional
 from fastapi.middleware.cors import CORSMiddleware
 import logging
 import traceback
-
+from vtu_question_generator import generate_vtu_question
 from resume.semantic_matcher import calculate_rag_semantic_match
 from resume.resume_parser import parse_resume
 from resume.ats_analyzer import analyze_ats
@@ -13,12 +13,15 @@ from resume.experience_analyzer import analyze_experience
 from resume.project_analyzer import analyze_projects
 from resume.achievement_analyzer import analyze_achievements
 from resume.feedback_generator import generate_feedback
+from resume.job_description_generator import generate_job_description
 
 from interview.question_generator import generate_question
 from interview.interview_feedback import generate_interview_report
 
 from answer_evaluation import evaluate_answer
-
+import os
+import tempfile
+from audio_transcription import transcribe_audio
 
 from topic_analysis import (
     analyze_topics,
@@ -79,6 +82,14 @@ class ResumeRequest(BaseModel):
     role: str = "General"
     job_description: Optional[str] = None
 
+
+class JobDescriptionRequest(BaseModel):
+    role: str
+
+class VTUQuestionRequest(BaseModel):
+    subject: str
+    module: str
+    topic: str
 
 class QuestionGenerationRequest(BaseModel):
     role: str
@@ -516,6 +527,7 @@ async def analyze_resume(
 
         }
 
+
     except Exception as e:
 
         logging.error(
@@ -533,6 +545,59 @@ async def analyze_resume(
                 "Resume analysis failed."
 
         }
+
+@app.post("/generate-vtu-question")
+def generate_vtu_exam_question(req: VTUQuestionRequest):
+    try:
+        result = generate_vtu_question(
+            subject=req.subject,
+            module=req.module,
+            topic=req.topic
+        )
+        return result
+
+    except Exception as error:
+        print("VTU QUESTION GENERATION ERROR:", error)
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to generate VTU question."
+        )
+
+@app.post("/generate-job-description")
+def generate_job_description_endpoint(req: JobDescriptionRequest):
+
+    role = (req.role or "").strip()
+
+    if not role:
+        raise HTTPException(
+            status_code=400,
+            detail="A target role is required."
+        )
+
+    try:
+        job_description = generate_job_description(role)
+
+        if not isinstance(job_description, str) or not job_description.strip():
+            raise ValueError("The AI service returned an invalid job description")
+
+        return {
+            "success": True,
+            "role": role,
+            "job_description": job_description.strip()
+        }
+
+    except HTTPException:
+        raise
+    except Exception as error:
+        logging.error(
+            "Job description generation failed: %s",
+            error,
+            exc_info=True
+        )
+        raise HTTPException(
+            status_code=502,
+            detail="Unable to generate a job description right now."
+        )
 
 
 # =========================================================
@@ -771,3 +836,43 @@ def next_question(req: AdaptiveQuestionRequest):
             status_code=500,
             detail=str(e)
         )
+ 
+@app.post("/transcribe-audio")
+async def transcribe_audio_endpoint(audio: UploadFile = File(...)):
+    if not audio.filename:
+        raise HTTPException(status_code=400, detail="No audio file provided.")
+
+    suffix = os.path.splitext(audio.filename)[1] or ".webm"
+    temp_path = None
+
+    try:
+        with tempfile.NamedTemporaryFile(
+            delete=False,
+            suffix=suffix
+        ) as temp_file:
+            temp_path = temp_file.name
+            content = await audio.read()
+            temp_file.write(content)
+
+        if not content:
+            raise HTTPException(
+                status_code=400,
+                detail="The uploaded audio file is empty."
+            )
+
+        transcript = transcribe_audio(temp_path)
+
+        return {"transcript": transcript}
+
+    except HTTPException:
+        raise
+    except Exception as error:
+        print("AUDIO TRANSCRIPTION ERROR:", error)
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to transcribe audio."
+        )
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            os.remove(temp_path)
+   

@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-
 import {
   fetchQuestions,
   getNextQuestion,
   evaluateInterviewAnswer,
   evaluateInterview,
+  transcribeAudio,
 } from "../services/api";
 
 const TOTAL_QUESTIONS = 5;
@@ -55,6 +55,15 @@ export default function Interview() {
   const [isEvaluating, setIsEvaluating] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+
+  //AUDIO STATE
+  const [isRecording, setIsRecording] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const [audioBlob, setAudioBlob] = useState(null);
+
+  const mediaRecorderRef = useRef(null);
+  const audioChunksRef = useRef([]);
+  const streamRef = useRef(null);
 
   // =====================================================
   // GET CURRENT USER
@@ -395,6 +404,133 @@ export default function Interview() {
 
       return updated;
     });
+  };
+// Read the current interview question aloud
+  const readQuestion = () => {
+    const question = questions[currentIndex];
+    const text = question?.question_text || question?.question || "";
+
+    if (!text) {
+      alert("No question available to read.");
+      return;
+    }
+
+    if (!("speechSynthesis" in window)) {
+      alert("Text-to-speech is not supported by this browser.");
+      return;
+    }
+
+    window.speechSynthesis.cancel();
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = "en-IN";
+    utterance.rate = 0.9;
+
+    window.speechSynthesis.speak(utterance);
+  };
+
+  // Stop reading the question
+  const stopReading = () => {
+    window.speechSynthesis?.cancel();
+  };
+
+  // Start recording the candidate's answer
+  const startRecording = async () => {
+    try {
+      if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+        alert("Audio recording is not supported by this browser.");
+        return;
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: true,
+      });
+
+      streamRef.current = stream;
+      audioChunksRef.current = [];
+
+      const recorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = recorder;
+
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      recorder.onstop = () => {
+        const blob = new Blob(audioChunksRef.current, {
+          type: recorder.mimeType || "audio/webm",
+        });
+
+        setAudioBlob(blob);
+
+        streamRef.current?.getTracks().forEach((track) => track.stop());
+        streamRef.current = null;
+
+        setIsRecording(false);
+      };
+
+      recorder.onerror = () => {
+        alert("An error occurred while recording audio.");
+        setIsRecording(false);
+      };
+
+      recorder.start();
+      setIsRecording(true);
+      setAudioBlob(null);
+    } catch (error) {
+      console.error("Recording error:", error);
+      alert("Could not access the microphone. Please allow microphone access.");
+    }
+  };
+
+  // Stop recording the answer
+  const stopRecording = () => {
+    if (mediaRecorderRef.current?.state === "recording") {
+      mediaRecorderRef.current.stop();
+    }
+  };
+
+  // Convert recorded speech into text using Whisper
+  const handleTranscribe = async () => {
+    if (!audioBlob) {
+      alert("Please record your answer first.");
+      return;
+    }
+
+    try {
+      setIsTranscribing(true);
+
+      const transcript = await transcribeAudio(audioBlob);
+
+      if (!transcript.trim()) {
+        alert("No speech was detected. Please record your answer again.");
+        return;
+      }
+
+      setAnswers((prev) => {
+        const updated = {
+          ...prev,
+          [currentIndex]: transcript,
+        };
+
+        sessionStorage.setItem(
+          "current_interview_answers",
+          JSON.stringify(updated)
+        );
+
+        return updated;
+      });
+
+      setAudioBlob(null);
+      alert("Your answer has been transcribed successfully.");
+    } catch (error) {
+      console.error("Transcription error:", error);
+      alert(error.message || "Failed to transcribe your answer.");
+    } finally {
+      setIsTranscribing(false);
+    }
   };
 
   // =====================================================
@@ -1311,6 +1447,25 @@ export default function Interview() {
         <p className="text-2xl font-semibold text-gray-800 mb-4">
           {questionText}
         </p>
+        
+        <div className="flex flex-wrap gap-3 mb-4">
+          <button
+            type="button"
+            onClick={readQuestion}
+            disabled={isRecording || isTranscribing}
+            className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+          >
+            🔊 Read Question
+          </button>
+
+          <button
+            type="button"
+            onClick={stopReading}
+            className="px-4 py-2 rounded-lg bg-gray-600 text-white hover:bg-gray-700"
+          >
+            ⏹ Stop Reading
+          </button>
+        </div>
 
         <textarea
           className="w-full p-4 border-2 rounded-xl focus:border-blue-500 outline-none transition-all resize-none"
@@ -1327,6 +1482,50 @@ export default function Interview() {
             isSubmitting
           }
         />
+
+        
+        <div className="flex flex-wrap gap-3 mt-4">
+          {!isRecording ? (
+            <button
+              type="button"
+              onClick={startRecording}
+              disabled={isTranscribing || isEvaluating || isSubmitting}
+              className="px-4 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+            >
+              🎙 Start Recording
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={stopRecording}
+              className="px-4 py-2 rounded-lg bg-gray-700 text-white hover:bg-gray-800"
+            >
+              ⏹ Stop Recording
+            </button>
+          )}
+
+          <button
+            type="button"
+            onClick={handleTranscribe}
+            disabled={!audioBlob || isTranscribing || isRecording}
+            className="px-4 py-2 rounded-lg bg-green-600 text-white hover:bg-green-700 disabled:opacity-50"
+          >
+            {isTranscribing ? "Transcribing..." : "📝 Transcribe Answer"}
+          </button>
+        </div>
+
+        {isRecording && (
+          <p className="mt-2 text-sm text-red-600">
+            Recording your answer... Click Stop Recording when finished.
+          </p>
+        )}
+
+        {audioBlob && !isRecording && (
+          <p className="mt-2 text-sm text-green-600">
+            Recording ready. Click Transcribe Answer to fill in your response.
+          </p>
+        )}
+
 
       </div>
 
@@ -1347,6 +1546,8 @@ export default function Interview() {
                 currentIndex
               ]?.trim() ||
               isSubmitting ||
+              isRecording ||
+              isTranscribing ||
               isEvaluating
             }
             className="bg-green-600 text-white px-8 py-3 rounded-lg font-bold hover:bg-green-700 shadow-lg disabled:bg-gray-400 disabled:cursor-not-allowed"
@@ -1363,6 +1564,8 @@ export default function Interview() {
                 currentIndex
               ]?.trim() ||
               isEvaluating ||
+              isRecording ||
+              isTranscribing ||
               isSubmitting
             }
             className="bg-blue-600 text-white px-8 py-3 rounded-lg font-bold hover:bg-blue-700 shadow-lg disabled:bg-gray-400 disabled:cursor-not-allowed"
