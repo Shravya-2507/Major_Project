@@ -6,6 +6,8 @@ const TOTAL_QUESTIONS = 5;
 
 const TOPICS = [
   "General",
+  "HR Interview",
+  "Behavioral Questions",
   "Programming",
   "Data Structures",
   "Algorithms",
@@ -245,6 +247,7 @@ export default function MockInterview() {
         {/* =====================================
             COMPANY
         ====================================== */}
+      
         <div>
           <label className="block text-sm font-bold text-gray-700 mb-2">
             Target Company
@@ -260,19 +263,20 @@ export default function MockInterview() {
             disabled={loading}
           >
             <option value="">
-              -- General / Other Companies --
+              -- Select a company --
             </option>
 
             {companies.map((company) => (
               <option
                 key={company.id}
-                value={company.id}
+                value={String(company.id)}
               >
                 {company.company_name}
               </option>
             ))}
           </select>
         </div>
+
 
         {/* =====================================
             ROLE

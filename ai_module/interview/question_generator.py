@@ -1,3 +1,4 @@
+
 import json
 import random
 import re
@@ -19,8 +20,8 @@ STOPWORDS = {
     "their", "using", "use", "describe", "tell", "me", "about",
 }
 
-MAX_ATTEMPTS = 5
-NUM_PREDICT = 200  # 120 can truncate the JSON output
+MAX_ATTEMPTS = 3
+NUM_PREDICT = 200
 
 
 # =========================================================
@@ -79,8 +80,7 @@ ROLE_SKILLS = {
     ],
 }
 
-# Not invalid topics, but they should not dominate a general
-# technical interview.
+
 LOW_PRIORITY_GENERAL_TOPICS = [
     "waterfall model",
     "incremental model",
@@ -92,6 +92,7 @@ LOW_PRIORITY_GENERAL_TOPICS = [
     "requirements engineer",
     "requirements engineering",
 ]
+
 
 DIFFICULTY_GUIDE = {
     "Easy": (
@@ -109,7 +110,7 @@ DIFFICULTY_GUIDE = {
 
 
 # =========================================================
-# FOCUS CONCEPTS (gives the model a concrete, rotating target)
+# FOCUS CONCEPTS
 # =========================================================
 
 OOP_FOCUS = [
@@ -126,6 +127,7 @@ OOP_FOCUS = [
     "class vs object",
     "abstraction and hiding implementation details",
 ]
+
 
 TOPIC_SUBTOPICS = {
     "object oriented programming": OOP_FOCUS,
@@ -154,6 +156,36 @@ TOPIC_SUBTOPICS = {
         "finding duplicate rows",
     ],
 }
+
+
+HR_FOCUS = [
+    "introducing yourself and summarizing your background",
+    "explaining why you want this role",
+    "describing your strengths and areas for improvement",
+    "handling constructive feedback",
+    "describing a challenge you overcame",
+    "working effectively with a team",
+    "resolving a disagreement with a colleague",
+    "managing competing priorities and deadlines",
+    "learning a new skill quickly",
+    "responding to a mistake at work",
+    "adapting to changing requirements",
+    "explaining why you are interested in the company",
+]
+
+
+BEHAVIORAL_FOCUS = [
+    "describing a time you solved a difficult problem",
+    "handling a disagreement within a team",
+    "demonstrating leadership or initiative",
+    "managing a tight deadline",
+    "learning from a failure or mistake",
+    "adapting to an unexpected change",
+    "receiving and applying constructive feedback",
+    "prioritizing multiple responsibilities",
+    "collaborating with someone with a different perspective",
+    "taking responsibility for an outcome",
+]
 
 
 # =========================================================
@@ -200,8 +232,15 @@ def is_general_topic(topic):
     }
 
 
+def is_hr_topic(topic):
+    return normalize_question(topic) in {
+        "hr interview",
+        "behavioral questions",
+    }
+
+
 # =========================================================
-# HISTORY HELPERS (adaptive behaviour)
+# HISTORY HELPERS
 # =========================================================
 
 def get_previous_questions(history):
@@ -282,8 +321,14 @@ def get_weak_subtopics(history, threshold=65, max_repeats=3):
 # FOCUS PICKER
 # =========================================================
 
-def pick_focus(role, topic, previous_questions, rejected_questions,
-               tried_focuses, weak_subtopics=None):
+def pick_focus(
+    role,
+    topic,
+    previous_questions,
+    rejected_questions,
+    tried_focuses,
+    weak_subtopics=None,
+):
     """
     Choose a concrete concept for this attempt so the model has a
     specific target instead of copying whatever the RAG context says.
@@ -302,6 +347,12 @@ def pick_focus(role, topic, previous_questions, rejected_questions,
 
         pool = pool or ROLE_SKILLS["software developer"]
 
+    elif topic_text == "hr interview":
+        pool = HR_FOCUS
+
+    elif topic_text == "behavioral questions":
+        pool = BEHAVIORAL_FOCUS
+
     else:
         pool = TOPIC_SUBTOPICS.get(topic_text) or [topic]
 
@@ -312,7 +363,6 @@ def pick_focus(role, topic, previous_questions, rejected_questions,
 
     candidates = [s for s in pool if s not in tried_focuses]
 
-    # Prefer concepts whose keywords have not appeared in earlier questions.
     unused = [
         s for s in candidates
         if not any(
@@ -321,7 +371,6 @@ def pick_focus(role, topic, previous_questions, rejected_questions,
         )
     ]
 
-    # Revisit weak areas on the first attempts (about 60% of the time).
     weak = [
         s for s in (weak_subtopics or [])
         if s in pool and s not in tried_focuses
@@ -411,8 +460,60 @@ def is_relevant_question(
     topic_text = normalize_question(topic)
     type_text = normalize_question(question_type)
 
-    if not text:
-        return False
+    # HR and behavioral questions should not require technical keywords.
+    if is_hr_topic(topic):
+        hr_signals = [
+            "tell me about yourself",
+            "introduce yourself",
+            "summarize your background",
+            "walk me through your resume",
+            "walk me through your background",
+            "describe your background",
+            "your experience",
+            "your career",
+            "describe a time",
+            "tell me about a time",
+            "share an example",
+            "give me an example",
+            "how would you handle",
+            "how do you handle",
+            "how did you handle",
+            "what would you do",
+            "your strengths",
+            "area for improvement",
+            "constructive feedback",
+            "work in a team",
+            "team member",
+            "teamwork",
+            "disagreement",
+            "conflict",
+            "deadline",
+            "challenge",
+            "mistake",
+            "failure",
+            "leadership",
+            "initiative",
+            "prioritize",
+            "prioritizing",
+            "motivation",
+            "why do you want",
+            "why are you interested",
+            "adapt to",
+            "adaptability",
+            "learn a new skill",
+            "different perspective",
+            "take responsibility",
+            "professional growth",
+            "career goals",
+        ]
+
+        if not contains_any(text, hr_signals):
+            print(
+                "Rejected: question does not match the HR/behavioral topic."
+            )
+            return False
+
+        return True
 
     # Prevent machine-learning questions for unrelated roles.
     ml_terms = [
@@ -453,8 +554,13 @@ def is_relevant_question(
         contains_any(text, LOW_PRIORITY_GENERAL_TOPICS)
         and not contains_any(
             topic_text,
-            ["sdlc", "agile", "scrum", "software engineering",
-             "project management"],
+            [
+                "sdlc",
+                "agile",
+                "scrum",
+                "software engineering",
+                "project management",
+            ],
         )
     ):
         print("Rejected: process/management question for technical role.")
@@ -469,7 +575,10 @@ def is_relevant_question(
                 matched_role = role_name
                 break
 
-        if matched_role and not contains_any(text, ROLE_SKILLS[matched_role]):
+        if (
+            matched_role
+            and not contains_any(text, ROLE_SKILLS[matched_role])
+        ):
             print(
                 f"Rejected: question does not contain a clear "
                 f"'{matched_role}' skill signal."
@@ -525,7 +634,6 @@ def is_relevant_question(
 
         terms = list(topic_aliases.get(topic_text, [topic_text]))
 
-        # Also accept the words of the chosen focus concept.
         if focus:
             terms.extend(content_words(normalize_question(focus)))
 
@@ -646,8 +754,34 @@ def build_prompt(
         DIFFICULTY_GUIDE["Medium"],
     )
 
+    hr_mode = is_hr_topic(topic)
+
+    interview_style = (
+        "an HR interviewer assessing communication, motivation, teamwork, "
+        "adaptability, and professional behavior"
+        if hr_mode
+        else "a technical interviewer assessing role-specific skills"
+    )
+
+    if hr_mode:
+        answer_instructions = """
+- Use a realistic sample response in simple, professional language.
+- For behavioral questions, use a concise example with action and outcome.
+- For introductory questions, provide a short sample introduction.
+- Do not require technical details unless they are relevant to the question.
+- Do not include placeholders such as [insert example] or [your experience].
+- Keep the answer around 20 to 50 words, at most three sentences.
+"""
+    else:
+        answer_instructions = """
+- Be technically accurate and use simple professional language.
+- Keep the answer between 20 and 35 words, at most two sentences.
+- Do not include code.
+- Do not include placeholders such as [insert example] or [your experience].
+"""
+
     return f"""
-You are an expert technical interviewer writing questions for entry-level candidates.
+You are an expert interviewer acting as {interview_style} for entry-level candidates.
 
 Generate exactly ONE interview question and ONE expected answer.
 
@@ -667,9 +801,15 @@ DIFFICULTY ({difficulty}):
 
 RULES:
 - Ask exactly ONE clear, entry-level question about the focus concept.
-- It must test a practical skill for the role "{role}".
+- For HR or behavioral topics, assess professional behavior, communication,
+  teamwork, motivation, adaptability, or problem-solving through a realistic
+  interview question.
+- For technical topics, test a practical skill for the role "{role}".
 - It must differ from every question in the lists below.
 - Do not ask about requirements engineering, SDLC, or project management.
+- For "HR Interview", introductory questions such as "Tell me about yourself"
+  are allowed.
+- For "Behavioral Questions", focus on a specific past experience or situation.
 
 REFERENCE MATERIAL (use only if relevant to the focus concept):
 {context}
@@ -687,8 +827,7 @@ REJECTED (do not repeat or paraphrase):
 {rejected_text}
 
 EXPECTED ANSWER:
-- Technically accurate, simple professional language.
-- 20 to 35 words, at most two sentences, no code.
+{answer_instructions}
 
 OUTPUT RULES:
 - Return only valid JSON, no Markdown, no code fences, no commentary.
@@ -697,7 +836,7 @@ OUTPUT RULES:
 OUTPUT FORMAT:
 {{
     "question": "One interview question about the focus concept",
-    "expected_answer": "A concise, technically correct answer."
+    "expected_answer": "A concise and appropriate sample answer."
 }}
 """
 
@@ -733,7 +872,14 @@ def get_company_profile(company):
 # =========================================================
 
 def get_context(role, company, topic, focus):
-    """Retrieve context for the focus; drop it only if harmful or off-role."""
+    """Retrieve relevant context, dropping it if harmful or off-role."""
+
+    # Avoid injecting unrelated technical documents into HR questions.
+    # This preserves question generation while bypassing technical RAG.
+    if is_hr_topic(topic):
+        print("HR/behavioral topic detected: skipping technical RAG retrieval.")
+        return ""
+
     try:
         context = retrieve_context(
             role=role,
@@ -759,7 +905,6 @@ def get_context(role, company, topic, focus):
 
     lowered = context.lower()
 
-    # Stems, so "authorization" also matches "authorize", "authorized".
     focus_terms = {
         word[:6]
         for word in content_words(normalize_question(focus))
@@ -864,6 +1009,7 @@ def generate_question(
     focus = topic
     llm_time = 0.0
     rag_time = 0.0
+    attempt_time = 0.0
 
     for attempt in range(MAX_ATTEMPTS):
         attempt_start = time.perf_counter()
@@ -885,9 +1031,11 @@ def generate_question(
             context = get_context(role, company, topic, focus)
             rag_time += time.perf_counter() - rag_start
 
-            context = context or (
-                "No reference material. Use your own technical knowledge."
-            )
+            if not context:
+                context = (
+                    "No reference material. Use your own knowledge to "
+                    "generate a relevant interview question."
+                )
 
             print(f"RAG context characters: {len(context)}")
 
@@ -909,7 +1057,11 @@ def generate_question(
             # Raise temperature on each retry to break out of loops.
             temperature = min(0.5 + 0.15 * attempt, 1.0)
 
-            response = call_llm(prompt, temperature=temperature)
+            llm_start = time.perf_counter()
+            try:
+                response = call_llm(prompt, temperature=temperature)
+            finally:
+                llm_time += time.perf_counter() - llm_start
 
             if not response:
                 print("Empty LLM response")
@@ -949,7 +1101,7 @@ def generate_question(
             print(f"Generation attempt {attempt + 1} failed:", error)
 
         finally:
-            llm_time += time.perf_counter() - attempt_start
+            attempt_time += time.perf_counter() - attempt_start
 
     # -----------------------------------------------------
     # HANDLE FAILURE
@@ -960,7 +1112,8 @@ def generate_question(
 
         print("\n========== PERFORMANCE ==========")
         print(f"RAG time: {rag_time:.2f} seconds")
-        print(f"Attempt time: {llm_time:.2f} seconds")
+        print(f"LLM time: {llm_time:.2f} seconds")
+        print(f"Attempt time: {attempt_time:.2f} seconds")
         print(f"Total time: {total_time:.2f} seconds")
         print(f"Rejected questions: {rejected_questions}")
         print("=================================")
@@ -982,6 +1135,14 @@ def generate_question(
         expected_answer,
         flags=re.DOTALL,
     ).strip()
+
+    # Remove accidental placeholder text if the model produces it.
+    expected_answer = re.sub(
+        r"\[[^\]]*\]",
+        "",
+        expected_answer,
+    )
+    expected_answer = " ".join(expected_answer.split())
 
     words = expected_answer.split()
 
@@ -1010,7 +1171,8 @@ def generate_question(
 
     print("\n========== PERFORMANCE ==========")
     print(f"RAG time: {rag_time:.2f} seconds")
-    print(f"Attempt time: {llm_time:.2f} seconds")
+    print(f"LLM time: {llm_time:.2f} seconds")
+    print(f"Attempt time: {attempt_time:.2f} seconds")
     print(f"Total time: {total_time:.2f} seconds")
     print("=================================")
 
