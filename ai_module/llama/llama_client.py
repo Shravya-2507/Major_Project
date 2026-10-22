@@ -5,6 +5,10 @@ from typing import Optional
 
 MODEL_NAME = "llama3.2:3b"
 
+# Connect to Ollama running on the Windows host
+OLLAMA_HOST = "http://host.docker.internal:11434"
+ollama_client = ollama.Client(host=OLLAMA_HOST)
+
 
 def ask_llama(
     prompt: str,
@@ -37,7 +41,7 @@ def ask_llama(
         if response_format:
             chat_options["format"] = response_format
 
-        response = ollama.chat(**chat_options)
+        response = ollama_client.chat(**chat_options)
 
         total_time = time.perf_counter() - start_time
 

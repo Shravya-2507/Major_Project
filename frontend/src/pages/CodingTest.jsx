@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { codingAPI } from "../services/api";
+const API_BASE =
+  import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
 export default function CodingTest() {
   const [questions, setQuestions] = useState([]);
@@ -78,7 +80,7 @@ export default function CodingTest() {
           codingAPI.get
             ? codingAPI.get("/code/next?candidateId=1")
             : fetch(
-                "http://localhost:5000/api/code/next?candidateId=1"
+                `${API_BASE}/code/next?candidateId=1`
               ).then((r) => r.json())
         );
 
@@ -101,7 +103,7 @@ export default function CodingTest() {
         try {
           const startRes = codingAPI.startTest
             ? await codingAPI.startTest({ candidateId: 1 })
-            : await fetch("http://localhost:5000/api/code/start", {
+            : await fetch(`${API_BASE}/code/start`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ candidateId: 1 }),
